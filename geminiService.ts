@@ -28,6 +28,7 @@ export const generateInpaintedImage = async (
       method: "POST",
      headers: {
   "Authorization": `Bearer ${apiKey}`,
+     }
         "HTTP-Referer": window.location.origin,
         "X-Title": "Blog Master App",
         "Content-Type": "application/json"
@@ -127,6 +128,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
       method: "POST",
      headers: {
   "Authorization": `Bearer ${apiKey}`,
+     }
         "HTTP-Referer": window.location.origin,
         "X-Title": "Blog Master App",
         "Content-Type": "application/json"
