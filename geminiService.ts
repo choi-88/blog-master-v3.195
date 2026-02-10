@@ -1,23 +1,38 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. 통합 API 설정
+// 1. 통합 API 설정 (제공해주신 파이썬 샘플 기반)
 const API_URL = "https://openai.apikey.run/v1/chat/completions";
 const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const MODEL_NAME = "gemini-2.0-flash";
 
 /**
- * 💡 안전 장치: JSON 파싱 및 지연 함수
+ * 💡 [에러 해결 핵심] 제어 문자 제거 및 JSON 파싱 함수
  */
 const extractJson = (content: string) => {
-  const jsonMatch = content.match(/```json?\n?([\s\S]*?)\n?```/);
-  const rawJson = jsonMatch ? jsonMatch[1] : content;
-  return JSON.parse(rawJson.trim());
+  try {
+    // 마크다운 코드 블록 제거
+    let cleaned = content.replace(/```json?\n?/, "").replace(/\n?```/, "").trim();
+    
+    // [이미지 0ff97f.png 에러 해결] 
+    // 문자열 내부의 실제 줄바꿈, 탭 등 제어 문자를 제거하거나 이스케이프 처리
+    cleaned = cleaned.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+      if (match === '\n') return '\\n';
+      if (match === '\r') return '\\r';
+      if (match === '\t') return '\\t';
+      return '';
+    });
+
+    return JSON.parse(cleaned);
+  } catch (e: any) {
+    console.error("JSON 파싱 상세 에러:", e);
+    throw new Error(`데이터 해석 실패: ${e.message}`);
+  }
 };
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 /**
- * [기능 1] 이미지 배경 합성 로직
+ * [기능 1] 이미지 배경 합성 로직 (사용자 지시사항 보존)
  */
 export const generateInpaintedImage = async (
   originalImage: ProductImageData,
@@ -69,57 +84,45 @@ export const generateInpaintedImage = async (
       nanoPrompt: imgReq.nanoPrompt
     };
   } catch (error: any) {
-    console.error("Image generation failed:", error);
+    console.error("이미지 생성 개별 실패:", error);
     return { url: '', filename: `failed_${index}.png`, description: '실패', nanoPrompt: '' };
   }
 };
 
 /**
- * [기능 2] 전체 블로그 시스템 생성 로직 (SEO/GEO 최적화 + 순차 이미지 생성)
+ * [기능 2] 전체 블로그 시스템 생성 로직 (SEO/GEO 대폭 강화)
  */
 export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean = false): Promise<BlogPost> => {
   const isImageOnly = inputs.generationMode === 'IMAGE_ONLY';
   
-  // 💡 [SEO/GEO 최적화 지시사항 강화]
-  const systemInstruction = `[Role: Naver Blog SEO & GEO Content Master]
-    당신은 네이버 블로그 검색 상위 노출과 AI Overviews(GEO)에 최적화된 콘텐츠를 작성하는 전문가입니다.
+  // 💡 [SEO/GEO 및 제목 생성 로직 대폭 강화]
+  const systemInstruction = `당신은 네이버 블로그 '상위 1%' 노출 전문가이자 GEO(AI 검색) 최적화 마스터입니다.
     
-    STRICT CONTENT RULES:
-    1. TITLE: 메인 키워드("${inputs.mainKeyword}")와 서브 키워드("${inputs.subKeywords}")를 자연스럽게 조합하여 25자 내외의 명확하고 매력적인 제목을 작성하세요.
-    2. LOGICAL HIERARCHY: ##와 ### 마크다운 헤더를 사용하여 가독성 높은 구조를 만드세요. 소제목에 [], () 등 특수문자 사용 금지.
-    3. ANSWER-FIRST: 서론의 첫 200자 이내에 사용자의 검색 의도에 대한 명확한 결론(정답)을 제시하세요. (GEO 최적화 핵심)
-    4. FACTUAL DATA: 제품의 스펙, 가격 등 수치 데이터는 반드시 마크다운 표(Table) 형식을 사용하여 정리하세요.
-    5. E-E-A-T: 실제 사용자가 작성한 것처럼 개인적인 경험과 통찰이 담긴 톤을 유지하세요. 'AI가 쓴 것 같은' 전형적인 말투를 피하세요.
-    6. FORBIDDEN: 별표(*) 기호를 절대 사용하지 마세요. 강조는 문맥이나 헤더로 처리하세요.
-    7. ALT-TEXT: 본문 적재적소에 [이미지 설명: {description}] 형태의 플레이스홀더를 삽입하세요.`;
+    [제목 생성 규칙]
+    - 메인 키워드("${inputs.mainKeyword}")는 반드시 제목 맨 앞에 배치합니다.
+    - 서브 키워드("${inputs.subKeywords}")를 조합하여 20~25자 사이의 명확한 문장형 제목을 만듭니다.
+    - 호기심을 유발하되 정보성이 뚜렷해야 합니다.
+    
+    [본문 작성 규칙 - SEO/GEO 최적화]
+    1. Answer-First: 도입부 첫 3문장 이내에 제품의 핵심 장점과 결론을 요약하여 배치하세요.
+    2. Logical Structure: ##(중제목), ###(소제목)을 사용하여 정보를 구조화하세요. (특수문자 [] 사용 금지)
+    3. Factual Table: 제품 정보(가격, 스펙 등)는 반드시 마크다운 표(Table)로 요약하여 본문 중간에 배치하세요.
+    4. Realistic EEAT: 실제 사용자가 내돈내산으로 리뷰하는 듯한 자연스러운 구어체를 사용하세요. (~해요, ~네요 등)
+    5. Forbidden: 본문 전체에서 별표(*) 기호를 절대 사용하지 마세요.
+    6. Alt-Text: [이미지 설명: {description}] 형태의 태그를 원고 흐름에 맞춰 5개 이상 적절히 배치하세요.`;
 
-  const prompt = `
-    [제품 정보]
-    제품명: ${inputs.productName}
-    메인 키워드: ${inputs.mainKeyword}
-    서브 키워드: ${inputs.subKeywords}
-    참고 링크: ${inputs.referenceLink || '없음'}
-    
-    [페르소나 설정]
-    타겟 독자: ${inputs.persona.targetAudience}
-    페인 포인트: ${inputs.persona.painPoint}
-    글의 톤: ${inputs.persona.writingTone}
-    진행 방향: ${inputs.persona.contentFlow || 'AI 추천 최적 흐름'}
-    
-    작업 지시:
-    상기 정보를 바탕으로 SEO 규칙을 준수하여 1,500자 이상의 고품질 원고를 작성하고, 아래 JSON 구조에 맞춰 응답하세요.`;
+  const prompt = `제품명: ${inputs.productName} / 메인 키워드: ${inputs.mainKeyword} / 서브 키워드: ${inputs.subKeywords} / 테마: ${inputs.backgroundLocation} / 페르소나 톤앤매너: ${inputs.persona.writingTone}.`;
 
   const schemaStr = JSON.stringify({
     globalBackgroundDNA: "string",
-    title: "짧고 명확한 키워드 조합형 제목",
-    body: "SEO 최적화된 본문 내용",
+    title: "키워드가 포함된 매력적인 제목",
+    body: "1500자 이상의 SEO 본문",
     persona: { targetAudience: "string", painPoint: "string", solutionBenefit: "string", writingTone: "string", callToAction: "string", contentFlow: "string" },
-    report: { rankingProbability: 0, safetyIndex: 0, suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: 0 },
+    report: { rankingProbability: 95, safetyIndex: 90, suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: 1500 },
     imagePrompts: [{ description: "string", nanoPrompt: "string" }]
   });
 
   try {
-    // 텍스트 생성 요청
     const response = await fetch(API_URL, {
       method: "POST",
       headers: {
@@ -130,58 +133,37 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         "model": MODEL_NAME,
         "messages": [
           { "role": "system", "content": systemInstruction },
-          { "role": "user", "content": `${prompt}\n\n응답 형식(JSON): ${schemaStr}` }
+          { "role": "user", "content": `${prompt}\n\n결과는 반드시 다음 JSON 구조를 따르며, 문자열 내부에 실제 줄바꿈 대신 \\n을 사용하세요: ${schemaStr}` }
         ],
-        "temperature": 0.8 // 창의적인 제목과 문장 생성을 위해 약간 높임
+        "temperature": 0.5 // JSON 구조 안정성을 위해 온도를 낮춤
       })
     });
 
     const result = await response.json();
     if (result.error) throw new Error(result.error.message);
 
-    const content = result.choices[0].message.content;
-    const rawData = extractJson(content);
+    const rawData = extractJson(result.choices[0].message.content);
     const dna = rawData.globalBackgroundDNA || "Natural snapshot";
 
-    // 💡 [이미지 순차 생성 로직] - 429 에러 방지
+    // 💡 [이미지 429 에러 해결] 순차적 이미지 생성 로직
     let finalImages: ImageResult[] = [];
     if (!skipImages) {
-      console.log("이미지 순차 생성 시작...");
       for (let idx = 0; idx < inputs.targetImageCount; idx++) {
-        try {
-          const imgIdx = idx % inputs.productImages.length;
-          const originalImage = inputs.productImages[imgIdx];
-          const imgReq = rawData.imagePrompts?.[idx] || { nanoPrompt: "Casual", description: `이미지 설명 ${idx+1}` };
-          const currentDishStyle = (idx < inputs.dishImageCount) ? inputs.backgroundDish : "surface";
-          
-          const imgResult = await generateInpaintedImage(
-            originalImage, 
-            inputs.backgroundLocation, 
-            inputs.backgroundColor, 
-            inputs.backgroundMaterial, 
-            currentDishStyle, 
-            imgReq, 
-            idx, 
-            inputs.mainKeyword || inputs.productName, 
-            dna
-          );
-          
-          if (imgResult.url) {
-            finalImages.push(imgResult);
-          }
-          
-          // 각 이미지 생성 사이에 1.5초 휴식 (서버 부하 조절)
-          if (idx < inputs.targetImageCount - 1) {
-            await sleep(1500);
-          }
-        } catch (imgError) {
-          console.error(`${idx + 1}번째 이미지 생성 실패:`, imgError);
-        }
+        const imgIdx = idx % inputs.productImages.length;
+        const imgReq = rawData.imagePrompts?.[idx] || { nanoPrompt: "Casual", description: `설명 ${idx+1}` };
+        const currentDishStyle = (idx < inputs.dishImageCount) ? inputs.backgroundDish : "surface";
+        
+        const imgRes = await generateInpaintedImage(inputs.productImages[imgIdx], inputs.backgroundLocation, inputs.backgroundColor, inputs.backgroundMaterial, currentDishStyle, imgReq, idx, inputs.mainKeyword || inputs.productName, dna);
+        
+        if (imgRes.url) finalImages.push(imgRes);
+        
+        // 429 에러 방지를 위한 2초 지연 (상당히 중요)
+        if (idx < inputs.targetImageCount - 1) await sleep(2000);
       }
     }
 
     return {
-      title: isImageOnly ? `${inputs.productName} 이미지 생성` : rawData.title,
+      title: isImageOnly ? `${inputs.productName} 이미지` : rawData.title,
       content: isImageOnly ? "이미지 전용 모드" : rawData.body,
       persona: rawData.persona,
       mode: inputs.generationMode,
@@ -190,7 +172,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
       groundingSources: [] 
     };
   } catch (e: any) {
-    console.error("System generation error:", e);
-    throw new Error(`콘텐츠 생성 오류: ${e.message}`);
+    console.error("블로그 시스템 생성 실패:", e);
+    throw new Error(`콘텐츠 생성 실패: ${e.message}`);
   }
 };
