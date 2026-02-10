@@ -2,13 +2,19 @@ import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
 // 1. 오픈라우터 기본 설정
 const apiKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY;
-console.log(
-  "OPENROUTER KEY:",
-  import.meta.env.VITE_OPENROUTER_API_KEY ? "OK" : "MISSING"
-);
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL_NAME = "google/gemini-2.0-flash-001"; // 오픈라우터에서 호출할 모델명
 
+const headers: Record<string, string> = {
+  Authorization: `Bearer ${apiKey}`,
+  "Content-Type": "application/json",
+  "HTTP-Referer": window.location.origin,
+  "X-Title": "Blog Master App",
+};
+
+const res = await fetch(OPENROUTER_URL, {
+  method: "POST",
+  headers,
+  body: JSON.stringify(payload),
+});
 /**
  * [이미지 배경 합성 로직] - 사용자님의 인페인팅 지시사항 100% 유지
  */
