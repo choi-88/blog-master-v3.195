@@ -1,23 +1,30 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. API 설정 (Vercel 환경 변수에서 각각 가져오기)
-const API_URL = "https://openai.apikey.run/v1/chat/completions";
-const TEXT_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY; // 텍스트용 키
-const IMAGE_API_KEY = import.meta.env.VITE_IMAGE_API_KEY;    // 💡 새로 찾으신 이미지전용 키
+/**
+ * 💡 [긴급 수정] 주소 앞에 슬래시(/)가 절대 붙지 않도록 절대 경로로 고정합니다.
+ */
+const TEXT_API_URL = "https://openai.apikey.run/v1/chat/completions";
+const IMAGE_API_URL = "https://openai.apikey.run/v1/chat/completions";
+
+// Vercel 환경 변수 (키가 다름을 명시)
+const TEXT_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY; // 텍스트용 sk-
+const IMAGE_API_KEY = import.meta.env.VITE_IMAGE_API_KEY;    // 💡 이미지용 sk-
 const MODEL_NAME = "gemini-2.0-flash";
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 /**
- * 💡 [JSON 정밀 추출] AI의 설명 찌꺼기를 제거하고 데이터만 추출
+ * 💡 AI의 지저분한 응답(설명, 마크다운 등)에서 JSON만 핀셋처럼 뽑아냅니다.
  */
 const extractJson = (content: string) => {
   try {
     const startIdx = content.indexOf('{');
     const endIdx = content.lastIndexOf('}');
-    if (startIdx === -1 || endIdx === -1) throw new Error("유효한 JSON 구조를 찾을 수 없습니다.");
-    
+    if (startIdx === -1 || endIdx === -1) {
+      throw new Error("서버 응답에서 데이터 구조를 찾을 수 없습니다. (API 상태 확인 필요)");
+    }
     let jsonStr = content.substring(startIdx, endIdx + 1);
+    // 제어 문자 및 줄바꿈 보정
     jsonStr = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
       if (match === '\n') return '\\n';
       if (match === '\r') return '\\r';
@@ -26,28 +33,12 @@ const extractJson = (content: string) => {
     });
     return JSON.parse(jsonStr);
   } catch (e: any) {
-    throw new Error(`데이터 파싱 실패: ${e.message}`);
+    throw new Error(`데이터 해석 실패: ${e.message}`);
   }
 };
 
 /**
- * 💡 [무한 로딩 방지] 타임아웃 기능 fetch
- */
-const fetchWithTimeout = async (url: string, options: any, timeout = 60000) => {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(id);
-    return response;
-  } catch (e: any) {
-    clearTimeout(id);
-    throw e;
-  }
-};
-
-/**
- * [기능 1] 이미지 배경 합성 로직 (이미지 전용 키 사용)
+ * [기능 1] 이미지 배경 합성 (이미지 전용 키 사용)
  */
 export const generateInpaintedImage = async (
   originalImage: ProductImageData,
@@ -61,12 +52,11 @@ export const generateInpaintedImage = async (
   globalBackgroundDNA: string
 ): Promise<ImageResult> => {
   try {
-    // 💡 이미지 전용 API 키(IMAGE_API_KEY)를 사용합니다.
-    const response = await fetchWithTimeout(API_URL, {
+    const response = await fetch(IMAGE_API_URL, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
-        "Authorization": `Bearer ${IMAGE_API_KEY}` 
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${IMAGE_API_KEY}`
       },
       body: JSON.stringify({
         "model": MODEL_NAME,
@@ -78,8 +68,9 @@ export const generateInpaintedImage = async (
           ]
         }]
       })
-    }, 50000);
+    });
 
+    if (!response.ok) return { url: '', filename: 'error.png', description: '부하', nanoPrompt: '' };
     const result = await response.json();
     return {
       url: result.choices?.[0]?.message?.content || "",
@@ -93,19 +84,19 @@ export const generateInpaintedImage = async (
 };
 
 /**
- * [기능 2] 전체 블로그 생성 로직 (텍스트 전용 키 사용)
+ * [기능 2] 전체 블로그 생성 (텍스트 전용 키 사용)
  */
 export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean = false): Promise<BlogPost> => {
   const isImageOnly = inputs.generationMode === 'IMAGE_ONLY';
   
-  // 💡 SEO/GEO 품질 극대화 지침
-  const systemInstruction = `당신은 네이버 블로그 SEO 및 AI 검색(GEO) 최적화 마스터입니다.
-    - 제목: 메인 키워드("${inputs.mainKeyword}")를 제목 맨 처음에 배치하고 서브 키워드("${inputs.subKeywords}")를 조합하여 25자 내외 제목 작성.
-    - 본문: 첫 150자 이내에 결론을 제시(Answer-First)하고, 수치 데이터는 표(Table)로 정리하세요. 별표(*) 사용 금지.`;
+  // SEO/GEO 지침 강화
+  const systemInstruction = `당신은 네이버 블로그 SEO 전문가입니다.
+    - 제목: 메인 키워드("${inputs.mainKeyword}")를 제목 맨 앞에 배치.
+    - 본문: 첫 150자 이내에 결론 배치(Answer-First). 표(Table) 필수 사용. 별표(*) 사용 금지.`;
 
   const schemaStr = JSON.stringify({
     globalBackgroundDNA: "string",
-    title: "메인키워드 포함 제목",
+    title: "키워드 포함 제목",
     body: "SEO 최적화 본문",
     persona: { targetAudience: "string", painPoint: "string", solutionBenefit: "string", writingTone: "string", callToAction: "string", contentFlow: "string" },
     report: { rankingProbability: 98, safetyIndex: 95, suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: 1500 },
@@ -113,12 +104,11 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
   });
 
   try {
-    // 💡 텍스트 전용 API 키(TEXT_API_KEY)를 사용합니다.
-    const response = await fetchWithTimeout(API_URL, {
+    const response = await fetch(TEXT_API_URL, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json", 
-        "Authorization": `Bearer ${TEXT_API_KEY}` 
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${TEXT_API_KEY}`
       },
       body: JSON.stringify({
         "model": MODEL_NAME,
@@ -128,9 +118,11 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         ],
         "temperature": 0.3
       })
-    }, 60000);
+    });
 
     const responseText = await response.text();
+    if (!response.ok) throw new Error(`API 서버 에러 (${response.status})`);
+
     const rawData = extractJson(responseText);
     const dna = rawData.globalBackgroundDNA || "Natural snapshot";
 
@@ -143,8 +135,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         const imgRes = await generateInpaintedImage(inputs.productImages[imgIdx], inputs.backgroundLocation, inputs.backgroundColor, inputs.backgroundMaterial, (idx < inputs.dishImageCount) ? inputs.backgroundDish : "surface", imgReq, idx, inputs.mainKeyword || inputs.productName, dna);
         
         if (imgRes.url) finalImages.push(imgRes);
-        // 💡 서버 부하 방지를 위해 이미지 생성 사이 5초 휴식
-        if (idx < inputs.targetImageCount - 1) await sleep(5000);
+        if (idx < inputs.targetImageCount - 1) await sleep(5000); // 💡 이미지당 5초 대기
       }
     }
 
