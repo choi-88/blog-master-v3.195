@@ -18,7 +18,7 @@ export const generateInpaintedImage = async (
   globalBackgroundDNA: string
 ): Promise<ImageResult> => {
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+   const response = await fetch(OPENROUTER_URL, {
   method: "POST",
   headers: {
     Authorization: `Bearer ${apiKey}`,
@@ -29,15 +29,14 @@ export const generateInpaintedImage = async (
   body: JSON.stringify({
     model: MODEL_NAME,
     messages: [
-      { role: "system", content: systemInstruction },
-      {
-        role: "user",
-        content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}`
-      }
+      // ... 너 메시지들
     ],
-    response_format: { type: "json_object" }
+    response_format: { type: "json_object" },
   }),
-});  
+});
+
+const result = await response.json();
+
         ({
         "model": MODEL_NAME,
         "messages": [
