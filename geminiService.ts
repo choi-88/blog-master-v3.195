@@ -1,7 +1,7 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
 // 1. 오픈라우터 기본 설정
-const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+const apiKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY;
 console.log(
   "OPENROUTER KEY:",
   import.meta.env.VITE_OPENROUTER_API_KEY ? "OK" : "MISSING"
