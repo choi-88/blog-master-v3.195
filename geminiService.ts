@@ -3,16 +3,14 @@ import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 // 1. 오픈라우터 기본 설정
 const apiKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY;
 
-const headers: Record<string, string> = {
-  Authorization: `Bearer ${apiKey}`,
-  "Content-Type": "application/json",
-  "HTTP-Referer": window.location.origin,
-  "X-Title": "Blog Master App",
-};
-
 const res = await fetch(OPENROUTER_URL, {
   method: "POST",
-  headers,
+  headers: {
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": window.location.origin,
+    "X-Title": "Blog Master App",
+    "Content-Type": "application/json",
+  },
   body: JSON.stringify(payload),
 });
 /**
@@ -34,7 +32,6 @@ export const generateInpaintedImage = async (
       method: "POST",
      headers: {
   "Authorization": `Bearer ${apiKey}`,
-     }
         "HTTP-Referer": window.location.origin,
         "X-Title": "Blog Master App",
         "Content-Type": "application/json"
