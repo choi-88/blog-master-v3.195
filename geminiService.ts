@@ -32,7 +32,7 @@ const extractJson = (content: string) => {
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 /**
- * [기능 1] 이미지 배경 합성 로직 (사용자 지시사항 보존)
+ * [기능 1] 이미지 배경 합성 로직
  */
 export const generateInpaintedImage = async (
   originalImage: ProductImageData,
@@ -104,14 +104,14 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     - 호기심을 유발하되 정보성이 뚜렷해야 합니다.
     
     [본문 작성 규칙 - SEO/GEO 최적화]
-    1. Answer-First: 도입부 첫 3문장 이내에 제품의 핵심 장점과 결론을 요약하여 배치하세요.
+    1. Answer-First: 도입부 첫 3문장 이내에 제품의 핵심 장점과 결론을 요약하여 배치하세요. (GEO 최적화)
     2. Logical Structure: ##(중제목), ###(소제목)을 사용하여 정보를 구조화하세요. (특수문자 [] 사용 금지)
     3. Factual Table: 제품 정보(가격, 스펙 등)는 반드시 마크다운 표(Table)로 요약하여 본문 중간에 배치하세요.
     4. Realistic EEAT: 실제 사용자가 내돈내산으로 리뷰하는 듯한 자연스러운 구어체를 사용하세요. (~해요, ~네요 등)
     5. Forbidden: 본문 전체에서 별표(*) 기호를 절대 사용하지 마세요.
-    6. Alt-Text: [이미지 설명: {description}] 형태의 태그를 원고 흐름에 맞춰 5개 이상 적절히 배치하세요.`;
+    6. Alt-Text: [이미지 설명: {description}] 형태의 플레이스홀더를 원고 흐름에 맞춰 적절히 배치하세요.`;
 
-  const prompt = `제품명: ${inputs.productName} / 메인 키워드: ${inputs.mainKeyword} / 서브 키워드: ${inputs.subKeywords} / 테마: ${inputs.backgroundLocation} / 페르소나 톤앤매너: ${inputs.persona.writingTone}.`;
+  const prompt = `제품명: ${inputs.productName} / 메인 키워드: ${inputs.mainKeyword} / 서브 키워드: ${inputs.subKeywords} / 테마: ${inputs.backgroundLocation} / 페르소나 톤: ${inputs.persona.writingTone}.`;
 
   const schemaStr = JSON.stringify({
     globalBackgroundDNA: "string",
@@ -135,7 +135,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
           { "role": "system", "content": systemInstruction },
           { "role": "user", "content": `${prompt}\n\n결과는 반드시 다음 JSON 구조를 따르며, 문자열 내부에 실제 줄바꿈 대신 \\n을 사용하세요: ${schemaStr}` }
         ],
-        "temperature": 0.5 // JSON 구조 안정성을 위해 온도를 낮춤
+        "temperature": 0.5
       })
     });
 
@@ -157,8 +157,8 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         
         if (imgRes.url) finalImages.push(imgRes);
         
-        // 429 에러 방지를 위한 2초 지연 (상당히 중요)
-        if (idx < inputs.targetImageCount - 1) await sleep(2000);
+        // 429 에러 방지를 위한 3초 지연 (상당히 중요)
+        if (idx < inputs.targetImageCount - 1) await sleep(3000);
       }
     }
 
