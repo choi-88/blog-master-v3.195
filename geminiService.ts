@@ -5,7 +5,7 @@ import { BlogInputs, BlogPost, ImageResult, ProductImageData, PersonaAnswers } f
 /**
  * Gemini API 클라이언트 초기화
  */
-const getGeminiClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getGeminiClient = () => new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
 /**
  * Gemini 이미지 생성 엔진 (Inpainting 모드)
