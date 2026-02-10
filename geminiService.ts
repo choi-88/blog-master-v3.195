@@ -3,7 +3,7 @@ import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 // 1. 오픈라우터 기본 설정
 const apiKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY;
 
-const res = await fetch(OPENROUTER_URL, {
+const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
   method: "POST",
   headers: {
     Authorization: `Bearer ${apiKey}`,
@@ -11,7 +11,17 @@ const res = await fetch(OPENROUTER_URL, {
     "X-Title": "Blog Master App",
     "Content-Type": "application/json",
   },
-  body: JSON.stringify(payload),
+  body: JSON.stringify({
+    model: MODEL_NAME,
+    messages: [
+      { role: "system", content: systemInstruction },
+      {
+        role: "user",
+        content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}`
+      }
+    ],
+    response_format: { type: "json_object" }
+  }),
 });
 /**
  * [이미지 배경 합성 로직] - 사용자님의 인페인팅 지시사항 100% 유지
@@ -28,15 +38,27 @@ export const generateInpaintedImage = async (
   globalBackgroundDNA: string
 ): Promise<ImageResult> => {
   try {
-    const response = await fetch(OPENROUTER_URL, {
-      method: "POST",
-     headers: {
-  "Authorization": `Bearer ${apiKey}`,
-        "HTTP-Referer": window.location.origin,
-        "X-Title": "Blog Master App",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": window.location.origin,
+    "X-Title": "Blog Master App",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: MODEL_NAME,
+    messages: [
+      { role: "system", content: systemInstruction },
+      {
+        role: "user",
+        content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}`
+      }
+    ],
+    response_format: { type: "json_object" }
+  }),
+});  
+        ({
         "model": MODEL_NAME,
         "messages": [
           {
@@ -127,24 +149,27 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
 
   try {
     // 🚀 [에러 원천 차단] googleSearch 툴을 제거하고 순수 fetch로 요청합니다.
-    const response = await fetch(OPENROUTER_URL, {
-      method: "POST",
-     headers: {
-  "Authorization": `Bearer ${apiKey}`,
-     }
-        "HTTP-Referer": window.location.origin,
-        "X-Title": "Blog Master App",
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        "model": MODEL_NAME,
-        "messages": [
-          { "role": "system", "content": systemInstruction },
-          { "role": "user", "content": `${prompt}\n\n중요: 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}` }
-        ],
-        "response_format": { "type": "json_object" }
-      })
-    });
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": window.location.origin,
+    "X-Title": "Blog Master App",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: MODEL_NAME,
+    messages: [
+      { role: "system", content: systemInstruction },
+      {
+        role: "user",
+        content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}`
+      }
+    ],
+    response_format: { type: "json_object" }
+  }),
+});
+
 
     const result = await response.json();
     if (result.error) throw new Error(result.error.message);
