@@ -19,7 +19,7 @@ export default async function handler(
         body: JSON.stringify({
           model: "gpt-image-1",
           prompt,
-          size: "1024x1024",
+          size: "860x860",
           n: 1,
         }),
       }
@@ -36,3 +36,4 @@ export default async function handler(
     return res.status(500).json({ error: e.message });
   }
 }
+
