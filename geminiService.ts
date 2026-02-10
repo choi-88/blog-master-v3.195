@@ -1,12 +1,21 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. 통합 API 설정 (보내주신 py 소스 기반)
+// 1. 통합 API 설정 (제공해주신 파이썬 샘플 규격)
 const API_URL = "https://openai.apikey.run/v1/chat/completions";
-const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY; // Vercel에 등록된 sk- 키
-const MODEL_NAME = "gemini-2.0-flash"; // 파이썬 소스에 명시된 제미나이 모델명
+const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+const MODEL_NAME = "gemini-2.0-flash";
 
 /**
- * [기능 1] 이미지 배경 합성 로직 (사용자님 인페인팅 지시사항 100% 유지)
+ * 💡 AI가 보낸 텍스트에서 ```json ... ``` 태그를 제거하는 안전 장치
+ */
+const extractJson = (content: string) => {
+  const jsonMatch = content.match(/```json?\n?([\s\S]*?)\n?```/);
+  const rawJson = jsonMatch ? jsonMatch[1] : content;
+  return JSON.parse(rawJson.trim());
+};
+
+/**
+ * [기능 1] 이미지 배경 합성 로직 - 사용자님 인페인팅 지시사항 100% 유지
  */
 export const generateInpaintedImage = async (
   originalImage: ProductImageData,
@@ -34,16 +43,7 @@ export const generateInpaintedImage = async (
             "content": [
               {
                 "type": "text",
-                "text": `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING.
-                STRICT RULES:
-                1. PRODUCT PRESERVATION: NEVER change the product's shape, design, logo, texture, or geometry.
-                2. BACKGROUND REPLACEMENT: Replace with "${backgroundLocation}".
-                3. SURFACE & STYLING: ${backgroundDish} on "${backgroundMaterial}" texture.
-                4. COLOR THEME: "${backgroundColor}" palette.
-                5. AESTHETIC STYLE: ${globalBackgroundDNA}. (iPhone 13 Pro look).
-                6. PHOTO QUALITY: Natural shadows, realistic mobile lens.
-                
-                SCENE DETAIL & CAMERA PERSPECTIVE: ${imgReq.nanoPrompt}`
+                "text": `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING. Replace background with "${backgroundLocation}", ${backgroundDish} on "${backgroundMaterial}", "${backgroundColor}" palette. DNA: ${globalBackgroundDNA}. Scene: ${imgReq.nanoPrompt}`
               },
               {
                 "type": "image_url",
@@ -58,13 +58,10 @@ export const generateInpaintedImage = async (
     });
 
     const result = await response.json();
-    if (result.error) throw new Error(result.error.message || "이미지 생성 실패");
-
-    // 통합 API 규격에 맞게 choices에서 응답 추출
-    const output = result.choices?.[0]?.message?.content || "";
+    if (result.error) throw new Error(result.error.message);
 
     return {
-      url: output,
+      url: result.choices?.[0]?.message?.content || "",
       filename: `${mainKeyword.replace(/[^\w가-힣]/g, '_')}_${index + 1}.png`,
       description: imgReq.description,
       nanoPrompt: imgReq.nanoPrompt
@@ -76,12 +73,12 @@ export const generateInpaintedImage = async (
 };
 
 /**
- * [기능 2] 전체 블로그 생성 로직 (SEO/GEO 최적화 지시사항 보존)
+ * [기능 2] 전체 블로그 생성 로직 - 사용자님 SEO/GEO/Schema 로직 완벽 보존
  */
 export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean = false): Promise<BlogPost> => {
   const isImageOnly = inputs.generationMode === 'IMAGE_ONLY';
   
-  // 💡 [사용자님 SEO/GEO 원본 로직 100% 유지]
+  // 💡 사용자님의 소중한 SEO/GEO 지시사항 (원본 그대로 유지)
   const systemInstruction = isImageOnly 
   ? `[Role: Professional Product Photographer & Prompt Engineer] 배경 합성용 프롬프트 생성 전문가.`
   : `[Role: Naver Blog SEO & GEO Content Master]
@@ -89,7 +86,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
 
   const prompt = `제품명: ${inputs.productName} / 키워드: ${inputs.mainKeyword} / 테마: ${inputs.backgroundLocation}`;
 
-  // 💡 [데이터 구조]
+  // 데이터 구조 정의
   const schemaStr = JSON.stringify({
     globalBackgroundDNA: "string",
     title: "string",
@@ -110,21 +107,21 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         "model": MODEL_NAME,
         "messages": [
           { "role": "system", "content": systemInstruction },
-          { "role": "user", "content": `${prompt}\n\n응답은 반드시 다음 JSON 구조를 따르세요: ${schemaStr}` }
+          { "role": "user", "content": `${prompt}\n\n응답은 반드시 마크다운(backticks) 없이 순수 JSON 텍스트로만 답변하세요: ${schemaStr}` }
         ],
         "temperature": 0.7
       })
     });
 
     const result = await response.json();
-    if (result.error) throw new Error(result.error.message || "텍스트 생성 실패");
+    if (result.error) throw new Error(result.error.message);
 
-    // 💡 응답 텍스트 파싱
+    // 💡 [해결 포인트] extractJson 함수를 사용하여 마크다운 태그가 있어도 안전하게 파싱합니다.
     const content = result.choices[0].message.content;
-    const rawData = JSON.parse(content || '{}');
+    const rawData = extractJson(content); 
+    
     const dna = rawData.globalBackgroundDNA || "Natural snapshot";
 
-    // 이미지 작업 수행
     let finalImages: ImageResult[] = [];
     if (!skipImages) {
       const imageTasks = Array.from({ length: inputs.targetImageCount }).map((_, idx) => {
@@ -138,7 +135,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     }
 
     return {
-      title: isImageOnly ? `${inputs.productName} 생성 결과` : rawData.title,
+      title: isImageOnly ? `${inputs.productName} 결과` : rawData.title,
       content: isImageOnly ? "이미지 모드" : rawData.body,
       persona: rawData.persona,
       mode: inputs.generationMode,
@@ -148,6 +145,6 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     };
   } catch (e: any) {
     console.error("System generation error:", e);
-    throw new Error(`콘텐츠 생성 중 오류: ${e.message}`);
+    throw new Error(`콘텐츠 생성 오류: ${e.message}`);
   }
 };
