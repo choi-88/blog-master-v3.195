@@ -1,14 +1,14 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. API 설정
-const API_URL = "https://openai.apikey.run/v1/chat/completions";
+// 1. 통합 API 설정 (제공해주신 파이썬 샘플 기반)
+const API_URL = "[https://openai.apikey.run/v1/chat/completions](https://openai.apikey.run/v1/chat/completions)";
 const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const MODEL_NAME = "gemini-2.0-flash";
 
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 /**
- * 💡 [에러 해결 마스터] 지저분한 응답에서도 JSON만 정밀 추출
+ * 💡 [에러 해결 마스터] AI가 어떤 군더더기를 붙여도 JSON 데이터만 정밀 타격합니다.
  */
 const extractJson = (content: string) => {
   try {
@@ -30,19 +30,18 @@ const extractJson = (content: string) => {
 };
 
 /**
- * 💡 [핵심] 타임아웃 기능이 포함된 fetch 함수 (무한 로딩 방지)
+ * 💡 [무한 로딩 방지] 타임아웃 기능이 포함된 fetch 함수
  */
 const fetchWithTimeout = async (url: string, options: any, timeout = 60000) => {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
-  
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(id);
     return response;
   } catch (e: any) {
     clearTimeout(id);
-    if (e.name === 'AbortError') throw new Error("서버 응답 시간이 초과되었습니다. 다시 시도해주세요.");
+    if (e.name === 'AbortError') throw new Error("서버 응답 시간이 초과되었습니다.");
     throw e;
   }
 };
@@ -75,7 +74,7 @@ export const generateInpaintedImage = async (
           ]
         }]
       })
-    }, 40000); // 이미지당 40초 타임아웃
+    }, 45000);
 
     const result = await response.json();
     return {
@@ -121,12 +120,10 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         ],
         "temperature": 0.3
       })
-    }, 60000); // 텍스트 생성 60초 타임아웃
+    }, 60000);
 
-    if (response.status === 429) throw new Error("현재 서버 부하가 높습니다. 1분 후 다시 시도해주세요.");
-
-    const result = await response.json();
-    const rawData = extractJson(result.choices[0].message.content);
+    const responseText = await response.text();
+    const rawData = extractJson(responseText);
     const dna = rawData.globalBackgroundDNA || "Natural snapshot";
 
     let finalImages: ImageResult[] = [];
@@ -138,7 +135,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         const imgRes = await generateInpaintedImage(inputs.productImages[imgIdx], inputs.backgroundLocation, inputs.backgroundColor, inputs.backgroundMaterial, (idx < inputs.dishImageCount) ? inputs.backgroundDish : "surface", imgReq, idx, inputs.mainKeyword || inputs.productName, dna);
         
         if (imgRes.url) finalImages.push(imgRes);
-        if (idx < inputs.targetImageCount - 1) await sleep(5000); // 5초 지연
+        if (idx < inputs.targetImageCount - 1) await sleep(5000); // 💡 요청하신 5초 지연
       }
     }
 
