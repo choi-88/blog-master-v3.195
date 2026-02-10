@@ -64,24 +64,23 @@ const ensureOkJson = async (res: Response) => {
   return res.json();
 };
 
-// ====== 3) 이미지 생성 (images/generations) ======
+// ====== 3) 이미지 생성 (프론트 → 서버 API 호출) ======
 export const generateImage = async (
   prompt: string,
   filenameBase: string
 ): Promise<ImageResult> => {
-  const res = await fetch(IMAGE_URL, {
+  const res = await fetch("/api/generate-image", {
     method: "POST",
-    headers: makeHeaders(),
-    body: JSON.stringify({
-      model: IMAGE_MODEL_NAME,
-      prompt,
-      n: 1,
-      size: "1024x1024",
-      // response_format: "b64_json", // 프록시에 따라 필요할 수 있음(필요 시 주석 해제)
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
   });
 
-  const json = await ensureOkJson(res);
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`이미지 생성 실패: ${t}`);
+  }
+
+  const json = await res.json();
 
   const b64 = json?.data?.[0]?.b64_json;
   if (b64) {
