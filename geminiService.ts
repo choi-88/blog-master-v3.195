@@ -1,12 +1,12 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. 오픈라우터 기본 설정
-const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+// OpenRouter 기본 설정
+const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL_NAME = "google/gemini-2.0-flash-001";
 
 /**
- * [기능 1] 이미지 배경 합성 로직 - 사용자님 인페인팅 지시사항 100% 유지
+ * 이미지 인페인팅 생성
  */
 export const generateInpaintedImage = async (
   originalImage: ProductImageData,
@@ -20,62 +20,73 @@ export const generateInpaintedImage = async (
   globalBackgroundDNA: string
 ): Promise<ImageResult> => {
   try {
+    if (!apiKey) throw new Error("OPENROUTER API KEY missing");
+
+    const userPrompt = `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING.
+
+STRICT RULES:
+1. PRODUCT PRESERVATION: NEVER change product shape, logo, or texture.
+2. BACKGROUND REPLACEMENT: ${backgroundLocation}
+3. SURFACE & STYLING: ${backgroundDish} on ${backgroundMaterial}
+4. COLOR THEME: ${backgroundColor}
+5. AESTHETIC STYLE: ${globalBackgroundDNA} (iPhone 13 Pro look)
+6. PHOTO QUALITY: Natural shadows, realistic mobile lens
+
+SCENE DETAIL:
+${imgReq.nanoPrompt}`;
+
+    const payload = {
+      model: MODEL_NAME,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: userPrompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${originalImage.mimeType};base64,${originalImage.data}`,
+              },
+            },
+          ],
+        },
+      ],
+    };
+
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "HTTP-Referer": window.location.origin,
         "X-Title": "Blog Master App",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: MODEL_NAME,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING.
-                STRICT RULES:
-                1. PRODUCT PRESERVATION: NEVER change the product's shape, design, logo, texture, or geometry.
-                2. BACKGROUND REPLACEMENT: Replace with "${backgroundLocation}".
-                3. SURFACE & STYLING: ${backgroundDish} on "${backgroundMaterial}" texture.
-                4. COLOR THEME: "${backgroundColor}" palette.
-                5. AESTHETIC STYLE: ${globalBackgroundDNA}. (iPhone 13 Pro look).
-                6. PHOTO QUALITY: Natural shadows, realistic mobile lens.
-                
-                SCENE DETAIL & CAMERA PERSPECTIVE: ${imgReq.nanoPrompt}`
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${originalImage.mimeType};base64,${originalImage.data}`
-                }
-              }
-            ]
-          }
-        ]
-      }),
+      body: JSON.stringify(payload),
     });
 
     const result = await response.json();
-    if (result.error) throw new Error(result.error.message);
 
-    // AI가 생성한 결과물 추출
-    const output = result.choices?.[0]?.message?.content || "";
+    if (!response.ok) {
+      throw new Error(result?.error?.message || "OpenRouter request failed");
+    }
 
     return {
-      url: output,
-      filename: `${mainKeyword.replace(/[^\w가-힣]/g, '_')}_${index + 1}.png`,
+      url: result.choices?.[0]?.message?.content || "",
+      filename: `${mainKeyword}_${index + 1}.png`,
       description: imgReq.description,
-      nanoPrompt: imgReq.nanoPrompt
+      nanoPrompt: imgReq.nanoPrompt,
     };
-  } catch (error: any) {
-    console.error("Image generation failed:", error);
-    return { url: '', filename: `failed_${index}.png`, description: '실패', nanoPrompt: '' };
+  } catch (error) {
+    console.error(error);
+    return {
+      url: "",
+      filename: `failed_${index}.png`,
+      description: "실패",
+      nanoPrompt: "",
+    };
   }
 };
+
 
 /**
  * [기능 2] 전체 블로그 생성 로직 - SEO/GEO 최적화 프롬프트 100% 유지
