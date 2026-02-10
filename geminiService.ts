@@ -1,6 +1,6 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. 오픈라우터 기본 설정
+// 1. 환경 변수 및 설정
 const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL_NAME = "google/gemini-2.0-flash-001"; // 오픈라우터용 모델명
@@ -62,8 +62,11 @@ export const generateInpaintedImage = async (
     const result = await response.json();
     if (result.error) throw new Error(result.error.message);
 
+    // 오픈라우터 응답에서 이미지 URL 또는 텍스트 결과 추출
+    const output = result.choices?.[0]?.message?.content || "";
+
     return {
-      url: result.choices?.[0]?.message?.content || "",
+      url: output,
       filename: `${mainKeyword.replace(/[^\w가-힣]/g, '_')}_${index + 1}.png`,
       description: imgReq.description,
       nanoPrompt: imgReq.nanoPrompt
@@ -75,12 +78,12 @@ export const generateInpaintedImage = async (
 };
 
 /**
- * [기능 2] 전체 블로그 생성 로직 (SEO/GEO 최적화 유지)
+ * [기능 2] 전체 블로그 생성 로직 (사용자님 SEO/GEO/Schema 로직 100% 유지)
  */
 export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean = false): Promise<BlogPost> => {
   const isImageOnly = inputs.generationMode === 'IMAGE_ONLY';
   
-  // 💡 [사용자님 SEO/GEO 원본 로직 유지]
+  // 💡 [사용자님 SEO/GEO 지시사항 보존]
   const systemInstruction = isImageOnly 
   ? `[Role: Professional Product Photographer & Prompt Engineer]
      Your task is to generate high-quality image prompts for product background replacement (inpainting).
@@ -91,15 +94,15 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     
     STRICT CONTENT RULES:
     1. LOGICAL HIERARCHY: Use Markdown ## and ### for subheadings. 
-    2. ANSWER-FIRST: Within the first 200 characters of the post, provide a direct answer.
+    2. ANSWER-FIRST: Within the first 200 characters of the post, provide a direct and clear answer.
     3. FACTUAL DATA (TABLES): Performance, price, and specs MUST be presented in Table format.
     4. E-E-A-T & ORIGINALITY: Include "Personal Experience" and "Unique Insights".
     5. SEMANTIC LINKING: Naturally mention related entities.
     6. CONTENT FLOW: Strictly follow the requested narrative structure.
     
     FORBIDDEN CHARACTERS: DO NOT use asterisks (*). No square brackets [] in subheadings.
-    ALT-TEXT: Insert [이미지 설명: {description}].
-    FINAL OUTPUT: Append the "Final Content Checklist" with [x].`;
+    ALT-TEXT & IMAGE PLACEHOLDERS: Insert [이미지 설명: {description}] at relevant points.
+    FINAL OUTPUT: Append the "Final Content Checklist" with all items marked as [x].`;
 
   const prompt = isImageOnly 
   ? `Generate ${inputs.targetImageCount} diverse image prompts for background synthesis.
@@ -112,18 +115,18 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     페르소나: ${inputs.persona.targetAudience}, ${inputs.persona.writingTone}
     작업 지시: 1,500자 이상의 고품질 원고를 작성하고 Markdown 표를 포함하세요. '*'와 '[]' 사용 금지.`;
 
-  // 💡 [사용자님 Schema 로직 유지]
-  const schemaStr = JSON.stringify({
+  // 💡 [사용자님 스키마 정의 보존]
+  const schema = {
     globalBackgroundDNA: "string",
     title: "string",
     body: "string",
     persona: { targetAudience: "string", painPoint: "string", solutionBenefit: "string", writingTone: "string", callToAction: "string", contentFlow: "string" },
-    report: { rankingProbability: 0, safetyIndex: 0, suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: 0 },
+    report: { rankingProbability: "number", safetyIndex: "number", suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: "number" },
     imagePrompts: [{ description: "string", nanoPrompt: "string" }]
-  });
+  };
 
   try {
-    // 💡 [에러 원인 해결] googleSearch 툴을 제거하고 순수 fetch 요청으로 보냅니다.
+    // 🚀 [에러 해결 핵심] googleSearch 툴을 제거하고 순수 fetch로 요청
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
@@ -136,7 +139,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         "model": MODEL_NAME,
         "messages": [
           { "role": "system", "content": systemInstruction },
-          { "role": "user", "content": `${prompt}\n\n중요: 반드시 다음 JSON 형식으로만 응답하세요: ${schemaStr}` }
+          { "role": "user", "content": `${prompt}\n\n중요: 반드시 다음 JSON 형식을 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}` }
         ],
         "response_format": { "type": "json_object" }
       })
@@ -148,7 +151,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     const rawData = JSON.parse(result.choices[0].message.content || '{}');
     const dna = rawData.globalBackgroundDNA || "Natural iPhone 13 Pro snapshot";
 
-    // 이미지 작업 수행 (위의 generateInpaintedImage 함수 호출)
+    // 이미지 작업 수행
     let finalImages: ImageResult[] = [];
     if (!skipImages) {
       const imageTasks = Array.from({ length: inputs.targetImageCount }).map((_, idx) => {
