@@ -1,7 +1,7 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
 // 1. 오픈라우터 기본 설정
-const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL_NAME = "google/gemini-2.0-flash-001"; // 오픈라우터에서 호출할 모델명
 
