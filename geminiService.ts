@@ -23,7 +23,7 @@ export const generateInpaintedImage = async (
 ): Promise<ImageResult> => {
   try {
     const ai = getGeminiClient();
-    const imageModel = 'gemini-2.5-flash-image'; 
+    const imageModel = 'gemini-2.5-flash'; 
     
     const response = await ai.models.generateContent({
       model: imageModel,
