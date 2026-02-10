@@ -28,10 +28,10 @@ export default async function handler(
     // 4️⃣ fetch
     const r = await fetch("https://openai.apikey.run/v1/images/generations", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+     headers: {
+  "Content-Type": "application/json",
+  Authorization: apiKey, // 🔥 Bearer 제거
+},
       body: JSON.stringify({
         model: "gpt-image-1",
         prompt,
@@ -55,3 +55,4 @@ export default async function handler(
     });
   }
 }
+
