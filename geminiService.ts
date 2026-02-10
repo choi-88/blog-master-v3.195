@@ -1,10 +1,12 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
+
 // 1. 오픈라우터 기본 설정
-const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL_NAME = "google/gemini-2.0-flash-001";
+
 /**
- * [이미지 배경 합성 로직] - 사용자님의 인페인팅 지시사항 100% 유지
+ * [기능 1] 이미지 배경 합성 로직 - 사용자님 인페인팅 지시사항 100% 유지
  */
 export const generateInpaintedImage = async (
   originalImage: ProductImageData,
@@ -18,34 +20,23 @@ export const generateInpaintedImage = async (
   globalBackgroundDNA: string
 ): Promise<ImageResult> => {
   try {
-   const response = await fetch(OPENROUTER_URL, {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${apiKey}`,
-    "HTTP-Referer": window.location.origin,
-    "X-Title": "Blog Master App",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    model: MODEL_NAME,
-    messages: [
-      // ... 너 메시지들
-    ],
-    response_format: { type: "json_object" },
-  }),
-});
-
-const result = await response.json();
-
-        ({
-        "model": MODEL_NAME,
-        "messages": [
+    const response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "Blog Master App",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: [
           {
-            "role": "user",
-            "content": [
+            role: "user",
+            content: [
               {
-                "type": "text",
-                "text": `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING.
+                type: "text",
+                text: `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING.
                 STRICT RULES:
                 1. PRODUCT PRESERVATION: NEVER change the product's shape, design, logo, texture, or geometry.
                 2. BACKGROUND REPLACEMENT: Replace with "${backgroundLocation}".
@@ -57,9 +48,9 @@ const result = await response.json();
                 SCENE DETAIL & CAMERA PERSPECTIVE: ${imgReq.nanoPrompt}`
               },
               {
-                "type": "image_url",
-                "image_url": {
-                  "url": `data:${originalImage.mimeType};base64,${originalImage.data}`
+                type: "image_url",
+                image_url: {
+                  url: `data:${originalImage.mimeType};base64,${originalImage.data}`
                 }
               }
             ]
@@ -71,8 +62,11 @@ const result = await response.json();
     const result = await response.json();
     if (result.error) throw new Error(result.error.message);
 
+    // AI가 생성한 결과물 추출
+    const output = result.choices?.[0]?.message?.content || "";
+
     return {
-      url: result.choices?.[0]?.message?.content || "",
+      url: output,
       filename: `${mainKeyword.replace(/[^\w가-힣]/g, '_')}_${index + 1}.png`,
       description: imgReq.description,
       nanoPrompt: imgReq.nanoPrompt
@@ -84,12 +78,11 @@ const result = await response.json();
 };
 
 /**
- * [전체 블로그 생성 로직] - 사용자님의 SEO/GEO 지시사항 및 스키마 로직 100% 유지
+ * [기능 2] 전체 블로그 생성 로직 - SEO/GEO 최적화 프롬프트 100% 유지
  */
 export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean = false): Promise<BlogPost> => {
   const isImageOnly = inputs.generationMode === 'IMAGE_ONLY';
   
-  // 💡 [사용자님 SEO/GEO 원본 로직 그대로 보존]
   const systemInstruction = isImageOnly 
   ? `[Role: Professional Product Photographer & Prompt Engineer]
      Your task is to generate high-quality image prompts for product background replacement (inpainting).
@@ -113,10 +106,9 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
   const prompt = isImageOnly 
   ? `Generate ${inputs.targetImageCount} diverse image prompts for background synthesis.` 
   : `제품명: ${inputs.productName} / 메인 키워드: ${inputs.mainKeyword} / 서브 키워드: ${inputs.subKeywords}
-    페르소나: ${inputs.persona.targetAudience} / 타겟의 페인포인트: ${inputs.persona.painPoint}
+    페르소나: ${inputs.persona.targetAudience} / 타켓의 페인포인트: ${inputs.persona.painPoint}
     작업 지시: SEO 최적화 조건 준수, 1,500자 이상 작성, Markdown 표 포함, 별표(*) 절대 사용 금지.`;
 
-  // 💡 [에러 방지를 위해 스키마를 표준 JSON 형식으로 정의]
   const schema = {
     globalBackgroundDNA: "string",
     title: "string",
@@ -127,28 +119,23 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
   };
 
   try {
-    // 🚀 [에러 원천 차단] googleSearch 툴을 제거하고 순수 fetch로 요청합니다.
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${apiKey}`,
-    "HTTP-Referer": window.location.origin,
-    "X-Title": "Blog Master App",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    model: MODEL_NAME,
-    messages: [
-      { role: "system", content: systemInstruction },
-      {
-        role: "user",
-        content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}`
-      }
-    ],
-    response_format: { type: "json_object" }
-  }),
-});
-
+    const response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${API_KEY}`,
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "Blog Master App",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: MODEL_NAME,
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}` }
+        ],
+        response_format: { type: "json_object" }
+      }),
+    });
 
     const result = await response.json();
     if (result.error) throw new Error(result.error.message);
