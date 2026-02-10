@@ -226,7 +226,7 @@ export const generateBlogSystem = async (
         if (imgRes.url) finalImages.push(imgRes);
 
         // 과도한 호출 방지용 지연(기존 5초 → 1.5초로 완화, 필요하면 다시 5초로)
-        if (idx < inputs.targetImageCount - 1) await sleep(1500);
+        if (idx < inputs.targetImageCount - 1) await sleep(5000);
       }
     }
 
