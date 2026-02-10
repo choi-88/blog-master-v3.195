@@ -1,28 +1,8 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
-
 // 1. 오픈라우터 기본 설정
-const apiKey = (import.meta as any).env?.VITE_OPENROUTER_API_KEY;
-
-const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${apiKey}`,
-    "HTTP-Referer": window.location.origin,
-    "X-Title": "Blog Master App",
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    model: MODEL_NAME,
-    messages: [
-      { role: "system", content: systemInstruction },
-      {
-        role: "user",
-        content: `${prompt}\n\n※ 반드시 제공된 JSON 구조를 엄격히 준수하여 응답하세요: ${JSON.stringify(schema)}`
-      }
-    ],
-    response_format: { type: "json_object" }
-  }),
-});
+const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL_NAME = "google/gemini-2.0-flash-001";
 /**
  * [이미지 배경 합성 로직] - 사용자님의 인페인팅 지시사항 100% 유지
  */
@@ -86,7 +66,7 @@ export const generateInpaintedImage = async (
             ]
           }
         ]
-      })
+      }),
     });
 
     const result = await response.json();
