@@ -17,17 +17,20 @@ export const generateInpaintedImage = async (
   globalBackgroundDNA: string
 ): Promise<ImageResult> => {
   try {
+    // 1. Vercel 환경 변수에서 오픈라우터 키 가져오기
     const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
     
-    // 💡 오픈라우터용 모델 이름 (보유하신 리스트 중 하나로 설정)
+    // 2. 오픈라우터 전용 모델 이름 (이미지 생성 가능한 모델로 설정)
     const modelName = "google/gemini-2.0-flash-001"; 
+
+    // 💡 [중요] 기존의 const ai = getGeminiClient(); 줄은 여기서 삭제되었습니다.
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${API_KEY}`,
-        "HTTP-Referer": window.location.origin, // 오픈라우터 필수 헤더
-        "X-Title": "Blog Master App",          // 오픈라우터 필수 헤더
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "Blog Master App",
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -39,16 +42,15 @@ export const generateInpaintedImage = async (
               {
                 "type": "text",
                 "text": `TASK: AMATEUR IPHONE SNAPSHOT INPAINTING.
-                
                 STRICT RULES:
-                1. PRODUCT PRESERVATION: NEVER change the product's shape, design, logo, texture, or geometry.
+                1. PRODUCT PRESERVATION: NEVER change the product's shape, design, logo.
                 2. BACKGROUND REPLACEMENT: Replace with "${backgroundLocation}".
                 3. SURFACE & STYLING: ${backgroundDish} on "${backgroundMaterial}" texture.
                 4. COLOR THEME: "${backgroundColor}" palette.
                 5. AESTHETIC STYLE: ${globalBackgroundDNA}. (iPhone 13 Pro look).
                 6. PHOTO QUALITY: Natural shadows, realistic mobile lens.
                 
-                SCENE DETAIL & CAMERA PERSPECTIVE: ${imgReq.nanoPrompt}`
+                SCENE DETAIL: ${imgReq.nanoPrompt}`
               },
               {
                 "type": "image_url",
@@ -65,18 +67,14 @@ export const generateInpaintedImage = async (
     const result = await response.json();
     
     if (result.error) {
-      throw new Error(result.error.message || "오픈라우터 호출 중 오류 발생");
+      throw new Error(result.error.message || "오픈라우터 호출 에러");
     }
 
-    // 오픈라우터가 반환한 데이터에서 이미지 URL 또는 응답 내용 추출
-    // (참고: 모델에 따라 base64 데이터를 다시 줄 수도 있고, URL을 줄 수도 있습니다)
-    let imageUrl = result.choices?.[0]?.message?.content || "";
-
-    // 만약 응답이 URL 형태가 아니라면 적절히 처리 (보통 생성 모델은 결과물을 줍니다)
-    if (!imageUrl) throw new Error("AI가 이미지 데이터를 생성하지 못했습니다.");
+    // AI가 생성한 결과물(텍스트 또는 이미지 URL) 추출
+    const output = result.choices?.[0]?.message?.content || "";
 
     return {
-      url: imageUrl,
+      url: output, // 생성된 이미지의 경로 또는 데이터
       filename: `${mainKeyword.replace(/[^\w가-힣]/g, '_')}_${index + 1}.png`,
       description: imgReq.description,
       nanoPrompt: imgReq.nanoPrompt
