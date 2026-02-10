@@ -1,30 +1,37 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-// 1. 통합 API 설정 (제공해주신 파이썬 샘플 기반)
+// 1. 통합 API 설정
 const API_URL = "https://openai.apikey.run/v1/chat/completions";
 const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const MODEL_NAME = "gemini-2.0-flash";
 
 /**
- * 💡 [에러 해결 핵심] 제어 문자 제거 및 JSON 파싱 함수
+ * 💡 [에러 해결 마스터] 가장 강력한 JSON 추출 로직
  */
 const extractJson = (content: string) => {
   try {
-    // 마크다운 코드 블록 제거
-    let cleaned = content.replace(/```json?\n?/, "").replace(/\n?```/, "").trim();
+    // 1. 텍스트에서 첫 번째 '{'와 마지막 '}'의 위치를 찾습니다.
+    const startIdx = content.indexOf('{');
+    const endIdx = content.lastIndexOf('}');
     
-    // [이미지 0ff97f.png 에러 해결] 
-    // 문자열 내부의 실제 줄바꿈, 탭 등 제어 문자를 제거하거나 이스케이프 처리
-    cleaned = cleaned.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+    if (startIdx === -1 || endIdx === -1) {
+      throw new Error("응답 데이터에서 JSON 형식을 찾을 수 없습니다.");
+    }
+
+    // 2. 해당 구간만 잘라냅니다.
+    let jsonStr = content.substring(startIdx, endIdx + 1);
+
+    // 3. [Bad control character 해결] 제어 문자 및 줄바꿈 보정
+    jsonStr = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
       if (match === '\n') return '\\n';
       if (match === '\r') return '\\r';
       if (match === '\t') return '\\t';
       return '';
     });
 
-    return JSON.parse(cleaned);
+    return JSON.parse(jsonStr);
   } catch (e: any) {
-    console.error("JSON 파싱 상세 에러:", e);
+    console.error("JSON 파싱 실패. 원본:", content);
     throw new Error(`데이터 해석 실패: ${e.message}`);
   }
 };
@@ -64,9 +71,7 @@ export const generateInpaintedImage = async (
               },
               {
                 "type": "image_url",
-                "image_url": {
-                  "url": `data:${originalImage.mimeType};base64,${originalImage.data}`
-                }
+                "image_url": { "url": `data:${originalImage.mimeType};base64,${originalImage.data}` }
               }
             ]
           }
@@ -75,50 +80,49 @@ export const generateInpaintedImage = async (
     });
 
     const result = await response.json();
-    if (result.error) throw new Error(result.error.message);
+    const output = result.choices?.[0]?.message?.content || "";
 
     return {
-      url: result.choices?.[0]?.message?.content || "",
+      url: output,
       filename: `${mainKeyword.replace(/[^\w가-힣]/g, '_')}_${index + 1}.png`,
       description: imgReq.description,
       nanoPrompt: imgReq.nanoPrompt
     };
   } catch (error: any) {
-    console.error("이미지 생성 개별 실패:", error);
+    console.error("이미지 개별 생성 실패:", error);
     return { url: '', filename: `failed_${index}.png`, description: '실패', nanoPrompt: '' };
   }
 };
 
 /**
- * [기능 2] 전체 블로그 시스템 생성 로직 (SEO/GEO 대폭 강화)
+ * [기능 2] 전체 블로그 생성 (SEO/GEO 최적화 대폭 강화)
  */
 export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean = false): Promise<BlogPost> => {
   const isImageOnly = inputs.generationMode === 'IMAGE_ONLY';
   
-  // 💡 [SEO/GEO 및 제목 생성 로직 대폭 강화]
-  const systemInstruction = `당신은 네이버 블로그 '상위 1%' 노출 전문가이자 GEO(AI 검색) 최적화 마스터입니다.
+  // 💡 [SEO/GEO 지시사항 대폭 강화]
+  const systemInstruction = `당신은 네이버 블로그 검색 엔진 최적화(SEO) 및 AI 검색(GEO) 마스터입니다.
     
-    [제목 생성 규칙]
-    - 메인 키워드("${inputs.mainKeyword}")는 반드시 제목 맨 앞에 배치합니다.
-    - 서브 키워드("${inputs.subKeywords}")를 조합하여 20~25자 사이의 명확한 문장형 제목을 만듭니다.
-    - 호기심을 유발하되 정보성이 뚜렷해야 합니다.
+    [제목 최적화 지침]
+    - 메인 키워드("${inputs.mainKeyword}")를 반드시 제목의 가장 앞부분에 배치하세요.
+    - 서브 키워드("${inputs.subKeywords}")를 한 개 이상 조합하여 20~25자 이내의 명확한 제목을 만드세요.
+    - 호기심을 유발하는 문구보다 '검색어'에 충실한 제목을 작성하세요.
     
-    [본문 작성 규칙 - SEO/GEO 최적화]
-    1. Answer-First: 도입부 첫 3문장 이내에 제품의 핵심 장점과 결론을 요약하여 배치하세요. (GEO 최적화)
-    2. Logical Structure: ##(중제목), ###(소제목)을 사용하여 정보를 구조화하세요. (특수문자 [] 사용 금지)
-    3. Factual Table: 제품 정보(가격, 스펙 등)는 반드시 마크다운 표(Table)로 요약하여 본문 중간에 배치하세요.
-    4. Realistic EEAT: 실제 사용자가 내돈내산으로 리뷰하는 듯한 자연스러운 구어체를 사용하세요. (~해요, ~네요 등)
-    5. Forbidden: 본문 전체에서 별표(*) 기호를 절대 사용하지 마세요.
-    6. Alt-Text: [이미지 설명: {description}] 형태의 플레이스홀더를 원고 흐름에 맞춰 적절히 배치하세요.`;
+    [콘텐츠 최적화 지침]
+    1. 도입부(첫 200자): 검색 의도에 대한 명확한 결론(Answer-First)을 두괄식으로 제시하세요.
+    2. 정보 구조: ## 중제목과 ### 소제목을 사용해 가독성을 높이세요.
+    3. 스펙 요약: 제품 정보와 가격은 반드시 '마크다운 표(Table)'로 정리해 본문 중간에 배치하세요.
+    4. 기호 제한: 별표(*) 및 소제목의 [] 기호 사용을 절대 금지합니다.
+    5. EEAT: 실제 사용자의 생생한 목소리로 신뢰감 있는 리뷰를 작성하세요.`;
 
-  const prompt = `제품명: ${inputs.productName} / 메인 키워드: ${inputs.mainKeyword} / 서브 키워드: ${inputs.subKeywords} / 테마: ${inputs.backgroundLocation} / 페르소나 톤: ${inputs.persona.writingTone}.`;
+  const prompt = `제품명: ${inputs.productName} / 메인키워드: ${inputs.mainKeyword} / 서브키워드: ${inputs.subKeywords} / 테마: ${inputs.backgroundLocation}`;
 
   const schemaStr = JSON.stringify({
     globalBackgroundDNA: "string",
-    title: "키워드가 포함된 매력적인 제목",
-    body: "1500자 이상의 SEO 본문",
+    title: "메인키워드+서브키워드 조합형 제목",
+    body: "1500자 이상의 SEO 본문 원고",
     persona: { targetAudience: "string", painPoint: "string", solutionBenefit: "string", writingTone: "string", callToAction: "string", contentFlow: "string" },
-    report: { rankingProbability: 95, safetyIndex: 90, suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: 1500 },
+    report: { rankingProbability: 98, safetyIndex: 95, suggestedCategory: "string", analysisSummary: "string", personaAnalysis: "string", avgWordCount: 1500 },
     imagePrompts: [{ description: "string", nanoPrompt: "string" }]
   });
 
@@ -133,19 +137,19 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         "model": MODEL_NAME,
         "messages": [
           { "role": "system", "content": systemInstruction },
-          { "role": "user", "content": `${prompt}\n\n결과는 반드시 다음 JSON 구조를 따르며, 문자열 내부에 실제 줄바꿈 대신 \\n을 사용하세요: ${schemaStr}` }
+          { "role": "user", "content": `${prompt}\n\n결과는 반드시 아래 JSON 구조만 출력하세요. 앞뒤 설명은 금지합니다: ${schemaStr}` }
         ],
-        "temperature": 0.5
+        "temperature": 0.4 // 데이터 안정성을 위해 낮춤
       })
     });
 
     const result = await response.json();
     if (result.error) throw new Error(result.error.message);
 
+    // 💡 [해결 포인트] 어떤 응답이 와도 JSON만 정밀 추출
     const rawData = extractJson(result.choices[0].message.content);
     const dna = rawData.globalBackgroundDNA || "Natural snapshot";
 
-    // 💡 [이미지 429 에러 해결] 순차적 이미지 생성 로직
     let finalImages: ImageResult[] = [];
     if (!skipImages) {
       for (let idx = 0; idx < inputs.targetImageCount; idx++) {
@@ -157,14 +161,14 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
         
         if (imgRes.url) finalImages.push(imgRes);
         
-        // 429 에러 방지를 위한 3초 지연 (상당히 중요)
+        // 429 에러 방지를 위한 3초 대기
         if (idx < inputs.targetImageCount - 1) await sleep(3000);
       }
     }
 
     return {
-      title: isImageOnly ? `${inputs.productName} 이미지` : rawData.title,
-      content: isImageOnly ? "이미지 전용 모드" : rawData.body,
+      title: isImageOnly ? `${inputs.productName} 이미지 결과` : rawData.title,
+      content: isImageOnly ? "이미지 생성 완료" : rawData.body,
       persona: rawData.persona,
       mode: inputs.generationMode,
       report: rawData.report,
@@ -172,7 +176,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
       groundingSources: [] 
     };
   } catch (e: any) {
-    console.error("블로그 시스템 생성 실패:", e);
+    console.error("최종 생성 실패:", e);
     throw new Error(`콘텐츠 생성 실패: ${e.message}`);
   }
 };
