@@ -26,8 +26,10 @@ export const generateInpaintedImage = async (
   try {
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${API_KEY}`,
+     headers: {
+  "Authorization": `Bearer ${apiKey}`,
+  "Content-Type": "application/json",
+}
         "HTTP-Referer": window.location.origin,
         "X-Title": "Blog Master App",
         "Content-Type": "application/json"
@@ -125,8 +127,10 @@ export const generateBlogSystem = async (inputs: BlogInputs, skipImages: boolean
     // 🚀 [에러 원천 차단] googleSearch 툴을 제거하고 순수 fetch로 요청합니다.
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${API_KEY}`,
+     headers: {
+  "Authorization": `Bearer ${apiKey}`,
+  "Content-Type": "application/json",
+}
         "HTTP-Referer": window.location.origin,
         "X-Title": "Blog Master App",
         "Content-Type": "application/json"
