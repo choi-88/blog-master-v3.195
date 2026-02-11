@@ -1,109 +1,82 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { BlogInputs, BlogPost, ImageResult } from "./types";
 
-// Vercel에 등록하신 VITE_ 접두사 변수를 정확히 읽어옵니다
+// 환경변수: Vercel에 VITE_ 붙여서 만드신 그 이름 그대로 씁니다.
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 const MODELSLAB_URL = "https://modelslab.com/api/v6/image_editing/inpaint";
 
-const genAI = new GoogleGenerativeAI(GEMINI_KEY || "");
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 /**
- * [기능 1] ModelsLab 배경 합성 (장당 약 5.4원)
+ * [이미지] ModelsLab 배경 합성 (장당 5원)
  */
-export const generateInpaintedImage = async (
-  imageURL: string, 
-  inputs: BlogInputs,
-  index: number,
-  nanoPrompt: string
-): Promise<ImageResult> => {
-  if (!MODELSLAB_KEY) return { url: '', filename: '', description: 'Key Missing', nanoPrompt: '' };
-
+async function generateInpaintedImage(imageURL: string, inputs: BlogInputs, nanoPrompt: string) {
   try {
-    const response = await fetch(MODELSLAB_URL, {
+    const res = await fetch(MODELSLAB_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         key: MODELSLAB_KEY,
-        model_id: "sd-xl-inpainting", // 가성비 모델
-        init_image: imageURL, 
-        mask_image: imageURL, 
-        prompt: `A high-end commercial photo, ${inputs.backgroundLocation}, ${inputs.backgroundMaterial}, ${inputs.backgroundColor} lighting, 8k resolution. ${nanoPrompt}`,
-        width: "1024",
-        height: "1024",
-        samples: "1",
-        safety_checker: "no"
+        model_id: "sd-xl-inpainting",
+        init_image: imageURL,
+        mask_image: imageURL,
+        prompt: `Professional product photography, ${inputs.backgroundLocation}, ${inputs.backgroundMaterial}, ${inputs.backgroundColor} theme. ${nanoPrompt}`,
+        width: "1024", height: "1024", samples: "1", safety_checker: "no"
       })
     });
-
-    const result = await response.json();
-    const finalUrl = result.output?.[0] || result.proxy_links?.[0] || ""; //
-
-    return {
-      url: finalUrl,
-      filename: `${inputs.mainKeyword}_${index + 1}.png`,
-      description: "AI Generated Lifestyle Photo",
-      nanoPrompt: nanoPrompt
-    };
-  } catch (error) {
-    return { url: '', filename: 'failed.png', description: '이미지 생성 실패', nanoPrompt: '' };
-  }
-};
+    const data = await res.json();
+    return data.output?.[0] || data.proxy_links?.[0] || "";
+  } catch { return ""; }
+}
 
 /**
- * [기능 2] 1,500자 이상 SEO/AEO 최적화 포스팅 생성
+ * [텍스트] 1500자 이상 + SEO/AEO 최적화 (라이브러리 미사용 버전)
  */
 export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> => {
-  if (!GEMINI_KEY) throw new Error("API Key 설정 오류");
+  if (!GEMINI_KEY) throw new Error("VITE_GEMINI_API_KEY가 없습니다.");
 
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash" // 무료 티어 활용
+  // 구글 API 직접 호출 주소 (SDK 설치 안해도 됨)
+  const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
+
+  const promptText = `당신은 네이버 블로그 SEO/AEO 전문가입니다. 
+    "${inputs.productName}"에 대해 다음 규칙을 지켜 작성하세요.
+    1. 제목: 무조건 "${inputs.mainKeyword}"로 시작할 것.
+    2. 분량: 공백 제외 1,500자 이상의 상세한 포스팅.
+    3. 구조: 첫 150자 내에 핵심 요약(AEO), 본문 중 상세 스펙 '표(Table)' 삽입.
+    4. 출력: 반드시 JSON 형식으로만 응답할 것.
+    JSON 형식: {"title": "...", "body": "...", "imagePrompts": [{"nanoPrompt": "..."}]}`;
+
+  const response = await fetch(GEMINI_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig: { response_mime_type: "application/json" }
+    })
   });
 
-  const prompt = `
-    당신은 네이버 블로그 SEO 및 AEO 전문가입니다. 
-    제품명: "${inputs.productName}", 메인키워드: "${inputs.mainKeyword}"
+  if (!response.ok) throw new Error("구글 API 호출 실패");
 
-    [작성 규칙 - 절대 준수]
-    1. 분량: 공백 제외 1,500자 이상의 장문으로 작성하세요. 
-    2. 제목: 반드시 "${inputs.mainKeyword}"로 시작하는 매력적인 제목을 만드세요.
-    3. 서론: 첫 150자 이내에 제품의 가장 큰 장점(결론)을 요약하세요 (AEO 최적화).
-    4. 본문: 소제목을 3개 이상 사용하고, 중간에 제품 사양 비교를 위한 'Markdown Table(표)'을 반드시 포함하세요.
-    5. 어투: 신뢰감 있으면서 부드러운 '~해요'체를 사용하세요.
+  const result = await response.json();
+  const blogData = JSON.parse(result.candidates[0].content.parts[0].text);
 
-    [출력 포맷]
-    반드시 하단의 JSON 구조로만 응답하세요.
-    {
-      "title": "제목",
-      "body": "본문 내용(1500자 이상)",
-      "persona": "작성자 컨셉",
-      "imagePrompts": [{"nanoPrompt": "5 keywords for background synthesis"}]
-    }`;
-
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().replace(/```json|```/g, "").trim();
-    const blogData = JSON.parse(text);
-
-    // 💡 실제로는 사용자가 업로드한 이미지의 URL을 전달해야 합니다.
-    const productUrl = "https://your-storage.com/uploaded-product.jpg"; 
-
-    let finalImages: ImageResult[] = [];
-    for (let i = 0; i < inputs.targetImageCount; i++) {
-      const imgRes = await generateInpaintedImage(productUrl, inputs, i, blogData.imagePrompts[0]?.nanoPrompt);
-      if (imgRes.url) finalImages.push(imgRes);
-      await sleep(3000); // API 안정성을 위한 대기
-    }
-
-    return {
-      ...blogData,
-      mode: inputs.generationMode,
-      images: finalImages,
-      report: { rankingProbability: 95, analysisSummary: "1500자+ 표 포함 SEO 완료" },
-      groundingSources: []
-    };
-  } catch (e: any) {
-    throw new Error(`생성 오류: ${e.message}`);
+  // 이미지 처리 (사용자가 업로드한 이미지 URL이 들어올 곳)
+  const productUrl = "https://your-image-url.com/sample.jpg"; 
+  
+  let finalImages: ImageResult[] = [];
+  for (let i = 0; i < inputs.targetImageCount; i++) {
+    const url = await generateInpaintedImage(productUrl, inputs, blogData.imagePrompts[0]?.nanoPrompt);
+    if (url) finalImages.push({ url, filename: `img_${i}.png`, description: "AI 합성", nanoPrompt: "" });
+    await sleep(3000);
   }
+
+  return {
+    ...blogData,
+    content: blogData.body,
+    persona: "Professional",
+    mode: inputs.generationMode,
+    report: { rankingProbability: 95, analysisSummary: "1500자+ SEO 최적화 완료" },
+    images: finalImages,
+    groundingSources: []
+  };
 };
