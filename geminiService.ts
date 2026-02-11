@@ -65,10 +65,29 @@ const extractModelslabImageValue = (result: any): string => {
   return (
     first(result?.output?.[0]) ||
     first(result?.proxy_links?.[0]) ||
-    first(result?.future_links?.[0]) ||
     first(result?.images?.[0]) ||
     first(result?.image)
   );
+};
+
+
+
+const pollModelslabFutureResult = async (futureLink: string): Promise<any> => {
+  const maxAttempts = 10;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await fetch(futureLink);
+    const result = await response.json();
+
+    const hasImage = Boolean(extractModelslabImageValue(result));
+    const status = String(result?.status || "").toLowerCase();
+    if (hasImage || !/(processing|pending|queued)/i.test(status)) {
+      return result;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+
+  throw new Error("ModelsLab 비동기 결과 폴링 타임아웃");
 };
 
 const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
@@ -263,6 +282,12 @@ const requestModelslabInpaint = async (
 
     const result = await res.json();
     if (!result?.error) {
+      const hasImage = Boolean(extractModelslabImageValue(result));
+      const futureLink = String(result?.future_links?.[0] || "");
+      const status = String(result?.status || "").toLowerCase();
+      if (!hasImage && futureLink && /(processing|pending|queued)/i.test(status)) {
+        return await pollModelslabFutureResult(futureLink);
+      }
       return result;
     }
 
