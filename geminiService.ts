@@ -65,45 +65,55 @@ const ensureOkJson = async (res: Response) => {
 };
 
 // ====== 3) 이미지 생성 (프론트 → 서버 API 호출) ======
-export const generateImage = async (
-  prompt: string,
-  filenameBase: string
-): Promise<ImageResult> => {
-  const res = await fetch("/api/generate-image", {
+export const generateImage = async (prompt: string, filenameBase: string): Promise<ImageResult> => {
+  const res = await fetch("/api/modelslab-text2img", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, width: 1024, height: 1024, steps: 30 }),
   });
 
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`이미지 생성 실패: ${t}`);
-  }
+  const text = await res.text();
+  if (!res.ok) throw new Error(text);
 
-  const json = await res.json();
+  const json = JSON.parse(text);
+  const url = json?.output?.[0];
+  if (!url) throw new Error("ModelsLab output url missing");
 
-  const b64 = json?.data?.[0]?.b64_json;
-  if (b64) {
-    return {
-      url: `data:image/png;base64,${b64}`,
-      filename: `${filenameBase}.png`,
-      description: prompt,
-      nanoPrompt: prompt,
-    };
-  }
-
-  const url = json?.data?.[0]?.url;
-  if (url) {
-    return {
-      url,
-      filename: `${filenameBase}.png`,
-      description: prompt,
-      nanoPrompt: prompt,
-    };
-  }
-
-  throw new Error("이미지 응답에 b64_json/url이 없습니다.");
+  return {
+    url,
+    filename: `${filenameBase}.png`,
+    description: prompt,
+    nanoPrompt: prompt,
+  };
 };
+
+export const inpaintImage = async (
+  prompt: string,
+  imageDataUrl: string,
+  maskDataUrl: string,
+  filenameBase: string
+): Promise<ImageResult> => {
+  const res = await fetch("/api/modelslab-inpaint", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, imageDataUrl, maskDataUrl }),
+  });
+
+  const text = await res.text();
+  if (!res.ok) throw new Error(text);
+
+  const json = JSON.parse(text);
+  const url = json?.output?.[0];
+  if (!url) throw new Error("ModelsLab inpaint output url missing");
+
+  return {
+    url,
+    filename: `${filenameBase}.png`,
+    description: prompt,
+    nanoPrompt: prompt,
+  };
+};
+
 
 /**
  * [기능 1] 이미지 생성 (기존 함수명 유지)
