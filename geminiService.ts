@@ -1,19 +1,8 @@
 import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 
-const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const GEMINI_MODEL = import.meta.env.VITE_GEMINI_MODEL;
 const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 const BLOB_TOKEN = import.meta.env.VITE_BLOB_READ_WRITE_TOKEN;
-const GEMINI_FALLBACK_VERSION = "fallback-v3";
-
-const PREFERRED_GEMINI_MODELS = [
-  GEMINI_MODEL,
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite"
-].filter(Boolean) as string[];
-
-const GEMINI_API_VERSIONS = ["v1", "v1beta"] as const;
+const CLIENT_BUILD_MARKER = "client-api-proxy-v1";
 
 const DEFAULT_PERSONA = {
   targetAudience: "",
@@ -45,101 +34,28 @@ const uploadToVercelBlob = async (image: ProductImageData): Promise<string> => {
   }
 };
 
-const listGeminiModelsForVersion = async (apiVersion: (typeof GEMINI_API_VERSIONS)[number]): Promise<string[]> => {
-  const url = `https://generativelanguage.googleapis.com/${apiVersion}/models?key=${GEMINI_KEY}`;
-  const response = await fetch(url);
-  const result = await response.json();
-
-  if (result.error) {
-    return [];
-  }
-
-  const names = (result.models || [])
-    .filter((model: any) => {
-      const methods = model.supportedGenerationMethods || [];
-      return methods.includes("generateContent");
+const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolean) => {
+  const response = await fetch("/api/generate-blog", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contentOnly,
+      productName: inputs.productName,
+      mainKeyword: inputs.mainKeyword,
+      generationMode: inputs.generationMode
     })
-    .map((model: any) => String(model.name || ""))
-    .map((name: string) => name.replace("models/", ""))
-    .filter(Boolean);
+  });
 
-  return names;
-};
-
-const getDynamicModelCandidates = async (): Promise<Array<{ apiVersion: string; modelName: string }>> => {
-  const dynamicPairs: Array<{ apiVersion: string; modelName: string }> = [];
-
-  for (const apiVersion of GEMINI_API_VERSIONS) {
-    const availableModels = await listGeminiModelsForVersion(apiVersion);
-
-    const preferredFirst = PREFERRED_GEMINI_MODELS.filter((name) => availableModels.includes(name));
-    const flashFamily = availableModels.filter((name) => /flash/i.test(name) && !preferredFirst.includes(name));
-    const rest = availableModels.filter((name) => !preferredFirst.includes(name) && !flashFamily.includes(name));
-
-    const ordered = [...preferredFirst, ...flashFamily, ...rest];
-    ordered.forEach((modelName) => dynamicPairs.push({ apiVersion, modelName }));
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result?.error || `콘텐츠 API 오류(${CLIENT_BUILD_MARKER})`);
   }
 
-  return dynamicPairs;
-};
-
-const getStaticFallbackPairs = (): Array<{ apiVersion: string; modelName: string }> => {
-  const pairs: Array<{ apiVersion: string; modelName: string }> = [];
-  for (const apiVersion of GEMINI_API_VERSIONS) {
-    for (const modelName of PREFERRED_GEMINI_MODELS) {
-      pairs.push({ apiVersion, modelName });
-    }
-  }
-  return pairs;
-};
-
-const callGeminiWithFallback = async (promptText: string): Promise<any> => {
-  let lastError = "";
-  const attempts: string[] = [];
-
-  const dynamicPairs = await getDynamicModelCandidates();
-  const allPairs = [...dynamicPairs, ...getStaticFallbackPairs()].filter(
-    (pair, idx, arr) => arr.findIndex((p) => p.apiVersion === pair.apiVersion && p.modelName === pair.modelName) === idx
-  );
-
-  for (const { apiVersion, modelName } of allPairs) {
-    const attemptLabel = `${apiVersion}/${modelName}`;
-    attempts.push(attemptLabel);
-
-    try {
-      const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${GEMINI_KEY}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }]
-        })
-      });
-
-      const result = await response.json();
-      if (!result.error) {
-        return result;
-      }
-
-      const apiError = result.error.message || `HTTP ${response.status}`;
-      lastError = `${attemptLabel} -> ${apiError}`;
-
-      const isModelAvailabilityError = /not found|not supported|unsupported|permission denied|404/i.test(apiError);
-      if (!isModelAvailabilityError) {
-        throw new Error(apiError);
-      }
-    } catch (error: any) {
-      lastError = `${attemptLabel} -> ${error?.message || "unknown error"}`;
-      const isRetryable = /not found|not supported|unsupported|permission denied|404/i.test(lastError);
-      if (!isRetryable) {
-        throw new Error(`구글 API 에러(${GEMINI_FALLBACK_VERSION}): ${lastError}`);
-      }
-    }
+  if (!result?.title || !result?.body) {
+    throw new Error(`콘텐츠 API 응답 형식 오류(${CLIENT_BUILD_MARKER})`);
   }
 
-  throw new Error(
-    `구글 API 에러(${GEMINI_FALLBACK_VERSION}): 사용 가능한 모델을 찾지 못했습니다. 마지막 오류: ${lastError}. 시도한 조합: ${attempts.join(", ")}`
-  );
+  return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string }> };
 };
 
 /**
@@ -218,21 +134,7 @@ export const generateInpaintedImage = async (
  * [함수 2] 블로그 생성
  */
 export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false): Promise<BlogPost> => {
-  if (!GEMINI_KEY) {
-    throw new Error("API 키를 확인하세요.");
-  }
-
-  const prompt = contentOnly
-    ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${inputs.productName}, 메인 키워드: ${inputs.mainKeyword}`
-    : `당신은 네이버 블로그 SEO 전문가입니다. "${inputs.productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${inputs.mainKeyword}"로 시작하고 본문에 비교 표를 포함하세요.`;
-
-  const result = await callGeminiWithFallback(
-    `${prompt}\n반드시 순수 JSON으로만 응답하세요: {"title": "제목", "body": "본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}`
-  );
-
-  const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  const cleanJsonText = rawText.replace(/```json|```/g, "").trim();
-  const blogData = JSON.parse(cleanJsonText);
+  const blogData = await requestBlogContentFromApi(inputs, contentOnly);
 
   const finalImages: ImageResult[] = [];
   if (!contentOnly && inputs.productImages?.length) {
