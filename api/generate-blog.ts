@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMINI_MODEL;
-const SERVER_MARKER = "server-fallback-v1";
+const SERVER_MARKER = "server-fallback-v2";
 
 const PREFERRED_GEMINI_MODELS = [
   GEMINI_MODEL,
@@ -56,6 +56,87 @@ const getModelPairs = async (): Promise<Array<{ apiVersion: string; modelName: s
   );
 };
 
+const sanitizeJsonText = (input: string): string => {
+  const text = input.replace(/```json|```/gi, "").trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  const sliced = start >= 0 && end > start ? text.slice(start, end + 1) : text;
+
+  let out = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < sliced.length; i += 1) {
+    const ch = sliced[i];
+
+    if (!inString) {
+      if (ch === '"') {
+        inString = true;
+      }
+      out += ch;
+      continue;
+    }
+
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      out += ch;
+      inString = false;
+      continue;
+    }
+
+    if (ch === "\n") {
+      out += "\\n";
+      continue;
+    }
+
+    if (ch === "\r") {
+      out += "\\r";
+      continue;
+    }
+
+    if (ch === "\t") {
+      out += "\\t";
+      continue;
+    }
+
+    const code = ch.charCodeAt(0);
+    if (code < 0x20) {
+      out += " ";
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
+};
+
+const parseGeminiJson = (rawText: string): { title: string; body: string; imagePrompts: Array<{ nanoPrompt?: string }> } => {
+  const sanitized = sanitizeJsonText(rawText);
+  const parsed = JSON.parse(sanitized);
+
+  if (!parsed?.title || !parsed?.body) {
+    throw new Error("Gemini JSON 응답에 title/body가 없습니다.");
+  }
+
+  return {
+    title: String(parsed.title),
+    body: String(parsed.body),
+    imagePrompts: Array.isArray(parsed.imagePrompts) ? parsed.imagePrompts : []
+  };
+};
+
 const generateWithFallback = async (promptText: string) => {
   const attempts: string[] = [];
   let lastError = "";
@@ -70,7 +151,10 @@ const generateWithFallback = async (promptText: string) => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }]
+          contents: [{ parts: [{ text: promptText }] }],
+          generationConfig: {
+            responseMimeType: "application/json"
+          }
         })
       });
 
@@ -115,13 +199,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    const cleanJsonText = rawText.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(cleanJsonText);
+    const parsed = parseGeminiJson(rawText);
 
     return res.status(200).json({
       title: parsed.title,
       body: parsed.body,
-      imagePrompts: parsed.imagePrompts || [],
+      imagePrompts: parsed.imagePrompts,
       marker: SERVER_MARKER
     });
   } catch (error: any) {
