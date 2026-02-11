@@ -39,6 +39,22 @@ const buildImageRequests = (
 const toDataUrl = (image: ProductImageData): string => `data:${image.mimeType};base64,${image.data}`;
 
 
+const normalizeGeneratedImageUrl = (rawValue: string): string => {
+  const value = String(rawValue || "").trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) {
+    return value;
+  }
+
+  const compact = value.replace(/\s+/g, "");
+  if (/^[A-Za-z0-9+/=]+$/.test(compact)) {
+    return `data:image/png;base64,${compact}`;
+  }
+
+  return value;
+};
+
+
 type ModelslabImageSource = {
   initImage: string;
   maskImage: string;
@@ -174,7 +190,9 @@ export const generateInpaintedImage = async (
   try {
     const imageSource = await resolveModelslabImageSource(image);
     const composedPrompt = [
-      "Professional iPhone product photo",
+      "Photorealistic product background replacement",
+      "Preserve the original product exactly (shape, logo, label, color, texture, proportion).",
+      "Do not deform or redraw the product. Keep camera angle and framing close to original.",
       `Main keyword: ${mainKeyword}`,
       `Scene: ${backgroundLocation}`,
       `Color mood: ${backgroundColor}`,
@@ -191,15 +209,18 @@ export const generateInpaintedImage = async (
       model_id: MODELSLAB_IMAGE_MODEL,
       model: MODELSLAB_IMAGE_MODEL,
       prompt: composedPrompt,
-      negative_prompt: "blurry, low resolution, watermark, text",
+      negative_prompt: "deformed product, warped package, melted object, duplicated object, blurry, low resolution, watermark, text",
       width: 1024,
       height: 1024,
       samples: 1,
+      num_inference_steps: 40,
+      guidance_scale: 6,
+      strength: 0.35,
       safety_checker: "no"
     });
 
-    const generatedUrl = result.output?.[0] || result.proxy_links?.[0] || "";
-    if (!generatedUrl) {
+    const generatedUrl = normalizeGeneratedImageUrl(result.output?.[0] || result.proxy_links?.[0] || "");
+    if (!generatedUrl || (!/^https?:\/\//i.test(generatedUrl) && !/^data:image\//i.test(generatedUrl))) {
       throw new Error(result?.message || "ModelsLab 이미지 URL이 반환되지 않았습니다.");
     }
 

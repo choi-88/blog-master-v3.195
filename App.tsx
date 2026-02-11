@@ -283,33 +283,62 @@ const App: React.FC = () => {
     }
   };
 
-  const downloadAllAsZip = async () => {
-    if (!result) return;
-    const zip = new JSZip();
-    if (result.mode === 'FULL') {
-      zip.file("blog_content.txt", `${result.title}\n\n${result.content}`);
-    }
-    const imgFolder = zip.folder("images");
-    
-    result.images.forEach((img, idx) => {
-      if (img.url) {
-        const base64Data = img.url.split(',')[1];
-        imgFolder?.file(img.filename || `image_${idx + 1}.png`, base64Data, { base64: true });
-      }
-    });
 
-    const content = await zip.generateAsync({ type: "blob" });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(content);
-    link.download = `${(inputs.mainKeyword || inputs.productName).replace(/\s/g, '_')}_package.zip`;
-    link.click();
+  const toUint8ArrayFromImageUrl = async (url: string): Promise<Uint8Array> => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`이미지 다운로드 실패: ${response.status}`);
+    }
+
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
   };
 
-  const downloadSingleImage = (url: string, filename: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
+  const downloadAllAsZip = async () => {
+    if (!result) return;
+
+    try {
+      const zip = new JSZip();
+      if (result.mode === 'FULL') {
+        zip.file("blog_content.txt", `${result.title}\n\n${result.content}`);
+      }
+      const imgFolder = zip.folder("images");
+
+      await Promise.all(
+        result.images.map(async (img, idx) => {
+          if (!img.url) return;
+          const imageBytes = await toUint8ArrayFromImageUrl(img.url);
+          imgFolder?.file(img.filename || `image_${idx + 1}.png`, imageBytes);
+        })
+      );
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${(inputs.mainKeyword || inputs.productName).replace(/\s/g, '_')}_package.zip`;
+      link.click();
+    } catch (error: any) {
+      alert(`이미지 ZIP 저장 중 오류 발생: ${error?.message || 'unknown error'}`);
+    }
+  };
+
+  const downloadSingleImage = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`이미지 다운로드 실패: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error: any) {
+      alert(`이미지 저장 중 오류 발생: ${error?.message || 'unknown error'}`);
+    }
   };
 
   const regenerateSingleImage = async (index: number, customBg?: string) => {
