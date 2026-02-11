@@ -41,6 +41,36 @@ const toDataUrl = (image: ProductImageData): string => `data:${image.mimeType};b
 
 const base64ToDataUrl = (base64: string, mimeType = "image/png"): string => `data:${mimeType};base64,${base64}`;
 
+const unwrapQuotedValue = (value: string): string => value.replace(/^b?["']|["']$/g, "");
+
+const inferMimeTypeFromBase64 = (base64: string): string => {
+  const sample = base64.slice(0, 20);
+  if (sample.startsWith("iVBOR")) return "image/png";
+  if (sample.startsWith("/9j/")) return "image/jpeg";
+  if (sample.startsWith("UklGR")) return "image/webp";
+  if (sample.startsWith("R0lGOD")) return "image/gif";
+  return "image/png";
+};
+
+const extractModelslabImageValue = (result: any): string => {
+  const first = (v: any): string => {
+    if (!v) return "";
+    if (typeof v === "string") return v;
+    if (typeof v === "object") {
+      return String(v.url || v.image || v.base64 || v.data || "");
+    }
+    return "";
+  };
+
+  return (
+    first(result?.output?.[0]) ||
+    first(result?.proxy_links?.[0]) ||
+    first(result?.future_links?.[0]) ||
+    first(result?.images?.[0]) ||
+    first(result?.image)
+  );
+};
+
 const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
@@ -65,8 +95,8 @@ const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMas
     ctx.fillStyle = editColor;
     ctx.fillRect(0, 0, width, height);
 
-    const protectW = width * 0.62;
-    const protectH = height * 0.68;
+    const protectW = width * 0.82;
+    const protectH = height * 0.86;
     const x = (width - protectW) / 2;
     const y = (height - protectH) / 2;
     const radius = Math.min(protectW, protectH) * 0.12;
@@ -105,18 +135,18 @@ const ensureRenderableImageUrl = async (rawValue: string): Promise<string> => {
 
 
 const normalizeGeneratedImageUrl = (rawValue: string): string => {
-  const value = String(rawValue || "").trim();
+  const value = unwrapQuotedValue(String(rawValue || "").trim());
   if (!value) return "";
   if (/^https?:\/\//i.test(value) || /^data:image\//i.test(value)) {
     return value;
   }
 
-  const compact = value.replace(/\s+/g, "");
-  if (/^[A-Za-z0-9+/=]+$/.test(compact)) {
-    return `data:image/png;base64,${compact}`;
+  const compact = value.replace(/\n|\r|\s+/g, "");
+  if (/^[A-Za-z0-9+/=]+$/.test(compact) && compact.length > 64) {
+    return base64ToDataUrl(compact, inferMimeTypeFromBase64(compact));
   }
 
-  return value;
+  return "";
 };
 
 
@@ -268,7 +298,7 @@ export const generateInpaintedImage = async (
     const composedPrompt = [
       "Photorealistic background-only replacement for a product photo",
       "Keep the uploaded product object pixel-faithful: do not alter shape, logo, label text, color, texture, or geometry.",
-      "Do not redraw the object; edit only surrounding background area.",
+      "Do not redraw or repaint the object; edit only surrounding background area and keep object pixels unchanged.",
       "Allow only natural global lighting effects on the object: saturation, brightness, soft reflection, and light direction adaptation.",
       `Main keyword: ${mainKeyword}`,
       `Scene: ${backgroundLocation}`,
@@ -292,11 +322,12 @@ export const generateInpaintedImage = async (
       samples: 1,
       num_inference_steps: 40,
       guidance_scale: 4.5,
-      strength: 0.2,
+      strength: 0.12,
       safety_checker: "no"
     });
 
-    const generatedUrl = await ensureRenderableImageUrl(result.output?.[0] || result.proxy_links?.[0] || "");
+    const generatedValue = extractModelslabImageValue(result);
+    const generatedUrl = await ensureRenderableImageUrl(generatedValue);
     if (!generatedUrl) {
       throw new Error(result?.message || "ModelsLab 이미지 URL이 반환되지 않았습니다.");
     }
