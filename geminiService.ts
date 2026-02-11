@@ -39,9 +39,19 @@ const buildImageRequests = (
 const toDataUrl = (image: ProductImageData): string => `data:${image.mimeType};base64,${image.data}`;
 
 
-const uploadToVercelBlob = async (image: ProductImageData): Promise<string> => {
+type ModelslabImageSource = {
+  initImage: string;
+  maskImage: string;
+  useBase64Input: boolean;
+};
+
+const resolveModelslabImageSource = async (image: ProductImageData): Promise<ModelslabImageSource> => {
   if (!BLOB_TOKEN) {
-    return toDataUrl(image);
+    return {
+      initImage: image.data,
+      maskImage: image.data,
+      useBase64Input: true
+    };
   }
 
   try {
@@ -52,9 +62,23 @@ const uploadToVercelBlob = async (image: ProductImageData): Promise<string> => {
       body: blob
     });
     const uploadData = await uploadRes.json();
-    return uploadData.url || toDataUrl(image);
+    const uploadedUrl = String(uploadData?.url || "");
+
+    if (!uploadedUrl) {
+      throw new Error("blob upload url missing");
+    }
+
+    return {
+      initImage: uploadedUrl,
+      maskImage: uploadedUrl,
+      useBase64Input: false
+    };
   } catch {
-    return toDataUrl(image);
+    return {
+      initImage: image.data,
+      maskImage: image.data,
+      useBase64Input: true
+    };
   }
 };
 
@@ -109,7 +133,7 @@ export const generateInpaintedImage = async (
   }
 
   try {
-    const initImage = await uploadToVercelBlob(image);
+    const imageSource = await resolveModelslabImageSource(image);
     const composedPrompt = [
       "Professional iPhone product photo",
       `Main keyword: ${mainKeyword}`,
@@ -132,8 +156,9 @@ export const generateInpaintedImage = async (
         model: MODELSLAB_IMAGE_MODEL,
         prompt: composedPrompt,
         negative_prompt: "blurry, low resolution, watermark, text",
-        init_image: initImage,
-        mask_image: initImage,
+        init_image: imageSource.initImage,
+        mask_image: imageSource.maskImage,
+        base64: imageSource.useBase64Input,
         width: 1024,
         height: 1024,
         samples: 1,
@@ -142,6 +167,10 @@ export const generateInpaintedImage = async (
     });
 
     const result = await res.json();
+
+    if (result?.error) {
+      throw new Error(String(result.error));
+    }
 
     const generatedUrl = result.output?.[0] || result.proxy_links?.[0] || "";
     if (!generatedUrl) {
