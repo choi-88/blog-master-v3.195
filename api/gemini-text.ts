@@ -8,8 +8,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
     const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    const systemInstruction = body?.systemInstruction ?? "";
-    const userPrompt = body?.userPrompt;
+    const systemInstruction = (body?.systemInstruction ?? "").trim();
+    const userPrompt = (body?.userPrompt ?? "").trim();
     if (!userPrompt) return res.status(400).json({ error: "userPrompt required" });
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -17,17 +17,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const ai = new GoogleGenAI({ apiKey });
 
+    // ✅ systemInstruction을 타입 안전하게 "프롬프트에 합쳐서" 전달
+    const finalPrompt = systemInstruction
+      ? `SYSTEM INSTRUCTION:\n${systemInstruction}\n\nUSER:\n${userPrompt}`
+      : userPrompt;
+
     const resp = await ai.models.generateContent({
       model: "gemini-1.5-flash",
-      contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      systemInstruction,
+      contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
       generationConfig: {
         temperature: 0.3,
-        responseMimeType: "application/json",
-      },
+        responseMimeType: "application/json"
+      }
     });
 
-    // SDK가 반환하는 텍스트 꺼내기
     const text =
       (resp as any)?.text ??
       (resp as any)?.response?.text?.() ??
