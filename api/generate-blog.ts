@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMINI_MODEL;
-const SERVER_MARKER = "server-fallback-v3";
+const SERVER_MARKER = "server-fallback-v4";
 
 const PREFERRED_GEMINI_MODELS = [
   GEMINI_MODEL,
@@ -168,6 +168,47 @@ const normalizeBlogBody = (body: string): string => {
   return withoutBold.trim();
 };
 
+
+const requestGeminiGenerateContent = async (url: string, promptText: string) => {
+  const payloadVariants = [
+    {
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig: { responseMimeType: "application/json" }
+    },
+    {
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig: { response_mime_type: "application/json" }
+    },
+    {
+      contents: [{ parts: [{ text: promptText }] }]
+    }
+  ];
+
+  let lastResult: any = null;
+
+  for (const payload of payloadVariants) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+    if (!result?.error) {
+      return result;
+    }
+
+    const apiError = String(result.error?.message || `HTTP ${response.status}`);
+    lastResult = result;
+
+    if (!/Unknown name "responseMimeType"|Unknown name "response_mime_type"|Cannot find field/i.test(apiError)) {
+      return result;
+    }
+  }
+
+  return lastResult || { error: { message: "Gemini 응답 없음" } };
+};
+
 const generateWithFallback = async (promptText: string) => {
   const attempts: string[] = [];
   let lastError = "";
@@ -178,23 +219,12 @@ const generateWithFallback = async (promptText: string) => {
 
     try {
       const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${GEMINI_KEY}`;
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }],
-          generationConfig: {
-            responseMimeType: "application/json"
-          }
-        })
-      });
-
-      const result = await response.json();
+      const result = await requestGeminiGenerateContent(url, promptText);
       if (!result.error) {
         return result;
       }
 
-      const apiError = result.error.message || `HTTP ${response.status}`;
+      const apiError = String(result.error?.message || "HTTP error");
       lastError = `${label} -> ${apiError}`;
       if (!/not found|not supported|unsupported|permission denied|404/i.test(apiError)) {
         throw new Error(lastError);
