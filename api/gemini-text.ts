@@ -16,7 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ✅ 모델명: "models/" 붙이지 말 것
     // 필요하면 "gemini-1.5-flash-latest"로 바꿔도 됨
-    const model = "gemini-1.5-flash";
+    const model = "gemini-1.5-flash-latest";
 
     // ✅ systemInstruction은 프롬프트에 합치기(호환성 최고)
     const finalPrompt = systemInstruction
