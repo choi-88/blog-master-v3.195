@@ -1,12 +1,12 @@
-import { BlogInputs, BlogPost, ImageResult } from "../types";
+// ../types가 아니라 ./types로 수정했습니다. (같은 폴더에 있으니까요!)
+import { BlogInputs, BlogPost, ImageResult } from "./types"; 
 
-// Vercel에서 이미 고치신 VITE_ 접두사 이름을 그대로 사용합니다.
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 
 /**
- * [함수 1] ModelsLab 배경 합성 (App.tsx에서 불러다 쓰는 함수)
- * export를 확실히 붙여서 "not exported" 에러를 해결했습니다.
+ * [함수 1] ModelsLab 배경 합성
+ * export를 확실히 붙여서 App.tsx가 바로 찾을 수 있게 했습니다.
  */
 export const generateInpaintedImage = async (
   imageURL: string, 
@@ -51,17 +51,17 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
 
   const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
 
-  const promptText = `당신은 네이버 블로그 SEO 및 AEO 전문가입니다. 
-    "${inputs.productName}"에 대해 아래 규칙을 100% 지켜 작성하세요.
+  const promptText = `당신은 네이버 블로그 SEO 전문가입니다. 
+    "${inputs.productName}"에 대해 아래 규칙을 100% 지켜서 작성하세요.
 
-    [작성 규칙]
+    [필수 규칙]
     1. 제목: 반드시 "${inputs.mainKeyword}"가 문장 맨 처음에 오게 작성.
-    2. 분량: 공백 제외 반드시 1,500자 이상의 매우 상세하고 긴 글. (절대 요약하지 말 것)
+    2. 분량: 공백 제외 반드시 1,500자 이상의 매우 상세하고 긴 글. (절대 요약 금지)
     3. AEO 최적화: 첫 150자 이내에 핵심 결론을 제시(두괄식).
-    4. 본문: 중간에 제품 정보를 비교한 'Markdown Table(표)'을 반드시 포함할 것.
+    4. 구조화: 본문 중간에 제품 정보를 비교한 'Markdown Table(표)'을 반드시 포함할 것.
     5. 형식: 반드시 순수 JSON으로만 응답할 것.
     
-    JSON 예시: {"title": "제목", "body": "1500자 이상의 본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}`;
+    JSON 형식: {"title": "제목", "body": "1500자 이상의 본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}`;
 
   const response = await fetch(GEMINI_URL, {
     method: "POST",
@@ -76,7 +76,10 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
   });
 
   const result = await response.json();
-  const blogData = JSON.parse(result.candidates[0].content.parts[0].text);
+  const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!rawText) throw new Error("AI 응답을 받지 못했습니다.");
+  
+  const blogData = JSON.parse(rawText);
 
   return {
     title: blogData.title,
