@@ -190,9 +190,10 @@ export const generateInpaintedImage = async (
   try {
     const imageSource = await resolveModelslabImageSource(image);
     const composedPrompt = [
-      "Photorealistic product background replacement",
-      "Preserve the original product exactly (shape, logo, label, color, texture, proportion).",
-      "Do not deform or redraw the product. Keep camera angle and framing close to original.",
+      "Photorealistic background-only replacement for a product photo",
+      "Keep the uploaded product object pixel-faithful: do not alter shape, logo, label text, color, texture, or geometry.",
+      "Do not redraw the object; edit only surrounding background area.",
+      "Allow only natural global lighting effects on the object: saturation, brightness, soft reflection, and light direction adaptation.",
       `Main keyword: ${mainKeyword}`,
       `Scene: ${backgroundLocation}`,
       `Color mood: ${backgroundColor}`,
@@ -209,13 +210,13 @@ export const generateInpaintedImage = async (
       model_id: MODELSLAB_IMAGE_MODEL,
       model: MODELSLAB_IMAGE_MODEL,
       prompt: composedPrompt,
-      negative_prompt: "deformed product, warped package, melted object, duplicated object, blurry, low resolution, watermark, text",
+      negative_prompt: "deformed product, warped package, melted object, duplicated object, altered label, changed text, distorted geometry, blurry, low resolution, watermark",
       width: 1024,
       height: 1024,
       samples: 1,
       num_inference_steps: 40,
-      guidance_scale: 6,
-      strength: 0.35,
+      guidance_scale: 4.5,
+      strength: 0.2,
       safety_checker: "no"
     });
 

@@ -2,14 +2,14 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMINI_MODEL;
-const SERVER_MARKER = "server-fallback-v4";
+const SERVER_MARKER = "server-fallback-v5";
 
 const PREFERRED_GEMINI_MODELS = [
   GEMINI_MODEL,
   "gemini-2.5-flash",
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
-  "gemini-1.5-flash-latest"
+  "gemini-2.0-flash-exp"
 ].filter(Boolean) as string[];
 
 const GEMINI_API_VERSIONS = ["v1", "v1beta"] as const;
@@ -26,7 +26,8 @@ const listGeminiModelsForVersion = async (apiVersion: (typeof GEMINI_API_VERSION
   return (result.models || [])
     .filter((model: any) => (model.supportedGenerationMethods || []).includes("generateContent"))
     .map((model: any) => String(model.name || "").replace("models/", ""))
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((name: string) => !/gemini-1\.5-flash/i.test(name));
 };
 
 const getModelPairs = async (): Promise<Array<{ apiVersion: string; modelName: string }>> => {
@@ -51,9 +52,9 @@ const getModelPairs = async (): Promise<Array<{ apiVersion: string; modelName: s
     }
   }
 
-  return [...dynamicPairs, ...staticPairs].filter(
-    (pair, idx, arr) => arr.findIndex((p) => p.apiVersion === pair.apiVersion && p.modelName === pair.modelName) === idx
-  );
+  return [...dynamicPairs, ...staticPairs]
+    .filter((pair) => !/gemini-1\.5-flash/i.test(pair.modelName))
+    .filter((pair, idx, arr) => arr.findIndex((p) => p.apiVersion === pair.apiVersion && p.modelName === pair.modelName) === idx);
 };
 
 const sanitizeJsonText = (input: string): string => {
