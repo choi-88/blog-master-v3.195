@@ -43,6 +43,7 @@ type ModelslabImageSource = {
   initImage: string;
   maskImage: string;
   useBase64Input: boolean;
+  dataUrl: string;
 };
 
 const resolveModelslabImageSource = async (image: ProductImageData): Promise<ModelslabImageSource> => {
@@ -50,7 +51,8 @@ const resolveModelslabImageSource = async (image: ProductImageData): Promise<Mod
     return {
       initImage: image.data,
       maskImage: image.data,
-      useBase64Input: true
+      useBase64Input: true,
+      dataUrl: toDataUrl(image)
     };
   }
 
@@ -71,13 +73,15 @@ const resolveModelslabImageSource = async (image: ProductImageData): Promise<Mod
     return {
       initImage: uploadedUrl,
       maskImage: uploadedUrl,
-      useBase64Input: false
+      useBase64Input: false,
+      dataUrl: toDataUrl(image)
     };
   } catch {
     return {
       initImage: image.data,
       maskImage: image.data,
-      useBase64Input: true
+      useBase64Input: true,
+      dataUrl: toDataUrl(image)
     };
   }
 };
@@ -114,6 +118,41 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
   return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string; description?: string }> };
 };
 
+const requestModelslabInpaint = async (
+  imageSource: ModelslabImageSource,
+  payloadBase: Record<string, any>
+): Promise<any> => {
+  const variants = imageSource.useBase64Input
+    ? [
+        { init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: true },
+        { init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: "true" },
+        { init_image: imageSource.dataUrl, mask_image: imageSource.dataUrl, base64: true }
+      ]
+    : [{ init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: false }];
+
+  let lastError = "";
+
+  for (const variant of variants) {
+    const res = await fetch("https://modelslab.com/api/v6/image_editing/inpaint", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payloadBase, ...variant })
+    });
+
+    const result = await res.json();
+    if (!result?.error) {
+      return result;
+    }
+
+    lastError = String(result.error || result.message || `HTTP ${res.status}`);
+    if (!/valid url when base64 is a representation of false/i.test(lastError)) {
+      throw new Error(lastError);
+    }
+  }
+
+  throw new Error(lastError || "ModelsLab 이미지 요청 실패");
+};
+
 /**
  * [함수 1] ModelsLab 배경 합성
  */
@@ -147,30 +186,17 @@ export const generateInpaintedImage = async (
       .filter(Boolean)
       .join(", ");
 
-    const res = await fetch("https://modelslab.com/api/v6/image_editing/inpaint", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key: MODELSLAB_KEY,
-        model_id: MODELSLAB_IMAGE_MODEL,
-        model: MODELSLAB_IMAGE_MODEL,
-        prompt: composedPrompt,
-        negative_prompt: "blurry, low resolution, watermark, text",
-        init_image: imageSource.initImage,
-        mask_image: imageSource.maskImage,
-        base64: imageSource.useBase64Input,
-        width: 1024,
-        height: 1024,
-        samples: 1,
-        safety_checker: "no"
-      })
+    const result = await requestModelslabInpaint(imageSource, {
+      key: MODELSLAB_KEY,
+      model_id: MODELSLAB_IMAGE_MODEL,
+      model: MODELSLAB_IMAGE_MODEL,
+      prompt: composedPrompt,
+      negative_prompt: "blurry, low resolution, watermark, text",
+      width: 1024,
+      height: 1024,
+      samples: 1,
+      safety_checker: "no"
     });
-
-    const result = await res.json();
-
-    if (result?.error) {
-      throw new Error(String(result.error));
-    }
 
     const generatedUrl = result.output?.[0] || result.proxy_links?.[0] || "";
     if (!generatedUrl) {
