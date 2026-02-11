@@ -20,6 +20,13 @@ const DEFAULT_PERSONA = {
 
 const toDataUrl = (image: ProductImageData): string => `data:${image.mimeType};base64,${image.data}`;
 
+const fallbackImageResult = (image: ProductImageData, index: number, nanoPrompt = ""): ImageResult => ({
+  url: toDataUrl(image),
+  filename: `source_${index + 1}.png`,
+  description: "원본 상품 이미지(합성 실패 시 대체)",
+  nanoPrompt
+});
+
 const uploadToVercelBlob = async (image: ProductImageData): Promise<string> => {
   if (!BLOB_TOKEN) {
     return toDataUrl(image);
@@ -86,12 +93,7 @@ export const generateInpaintedImage = async (
   personaHint: string
 ): Promise<ImageResult> => {
   if (!MODELSLAB_KEY) {
-    return {
-      url: "",
-      filename: `ai_${index + 1}.png`,
-      description: imageRequest.description || "이미지 생성 실패",
-      nanoPrompt: imageRequest.nanoPrompt || ""
-    };
+    return fallbackImageResult(image, index, imageRequest.nanoPrompt || "");
   }
 
   try {
@@ -127,19 +129,19 @@ export const generateInpaintedImage = async (
 
     const result = await res.json();
 
+    const generatedUrl = result.output?.[0] || result.proxy_links?.[0] || "";
+    if (!generatedUrl) {
+      return fallbackImageResult(image, index, imageRequest.nanoPrompt || "");
+    }
+
     return {
-      url: result.output?.[0] || result.proxy_links?.[0] || "",
+      url: generatedUrl,
       filename: `ai_${index + 1}.png`,
       description: imageRequest.description || "AI 합성 이미지",
       nanoPrompt: imageRequest.nanoPrompt || ""
     };
   } catch {
-    return {
-      url: "",
-      filename: `ai_${index + 1}.png`,
-      description: "이미지 생성 실패",
-      nanoPrompt: imageRequest.nanoPrompt || ""
-    };
+    return fallbackImageResult(image, index, imageRequest.nanoPrompt || "");
   }
 };
 
@@ -168,9 +170,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
       inputs.persona.targetAudience || "일반 소비자"
     );
 
-    if (imgRes.url) {
-      finalImages.push(imgRes);
-    }
+    finalImages.push(imgRes);
   }
 
   return {
