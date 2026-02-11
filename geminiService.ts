@@ -31,7 +31,7 @@ export const generateInpaintedImage = async (imageURL: string, inputs: BlogInput
 export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> => {
   if (!GEMINI_KEY) throw new Error("API 키를 확인하세요.");
 
-  // 404 에러 방지를 위해 v1 주소를 사용합니다.
+  // 💡 주소를 v1으로 수정하여 404 에러를 해결했습니다
   const GEMINI_URL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
 
   const promptText = `네이버 블로그 전문가로서 "${inputs.productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${inputs.mainKeyword}"로 시작하고 표를 포함하세요. 반드시 JSON으로만 답하세요: {"title": "제목", "body": "1500자 본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}`;
@@ -42,7 +42,8 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
     body: JSON.stringify({
       contents: [{ parts: [{ text: promptText }] }],
       generationConfig: { 
-        response_mime_type: "application/json", // 400 에러 방지용 snake_case
+        // 💡 필드명을 response_mime_type으로 수정하여 400 에러를 해결했습니다
+        response_mime_type: "application/json", 
         max_output_tokens: 8192 
       }
     })
@@ -53,7 +54,7 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
   if (!rawText) throw new Error("AI 응답 데이터가 비어있습니다. API 키 권한을 확인하세요.");
   const blogData = JSON.parse(rawText);
 
-  // 라이브러리 없이 직접 사진 업로드
+  // 💡 빌드 에러 해결: @vercel/blob 없이 직접 사진 업로드
   let productUrl = "";
   if (inputs.productImages?.[0]?.data && BLOB_TOKEN) {
     try {
