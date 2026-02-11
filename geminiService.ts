@@ -39,6 +39,71 @@ const buildImageRequests = (
 const toDataUrl = (image: ProductImageData): string => `data:${image.mimeType};base64,${image.data}`;
 
 
+const base64ToDataUrl = (base64: string, mimeType = "image/png"): string => `data:${mimeType};base64,${base64}`;
+
+const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("마스크 생성을 위한 원본 이미지 로드 실패"));
+    el.src = toDataUrl(image);
+  });
+
+  const width = img.naturalWidth || 1024;
+  const height = img.naturalHeight || 1024;
+
+  const paintMask = (protectColor: "black" | "white"): string => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("마스크 캔버스 컨텍스트 생성 실패");
+    }
+
+    const editColor = protectColor === "black" ? "white" : "black";
+    ctx.fillStyle = editColor;
+    ctx.fillRect(0, 0, width, height);
+
+    const protectW = width * 0.62;
+    const protectH = height * 0.68;
+    const x = (width - protectW) / 2;
+    const y = (height - protectH) / 2;
+    const radius = Math.min(protectW, protectH) * 0.12;
+
+    ctx.fillStyle = protectColor;
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + protectW - radius, y);
+    ctx.quadraticCurveTo(x + protectW, y, x + protectW, y + radius);
+    ctx.lineTo(x + protectW, y + protectH - radius);
+    ctx.quadraticCurveTo(x + protectW, y + protectH, x + protectW - radius, y + protectH);
+    ctx.lineTo(x + radius, y + protectH);
+    ctx.quadraticCurveTo(x, y + protectH, x, y + protectH - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+
+    return canvas.toDataURL("image/png").split(",")[1] || "";
+  };
+
+  return {
+    backgroundMaskBase64: paintMask("black"),
+    invertedMaskBase64: paintMask("white")
+  };
+};
+
+const ensureRenderableImageUrl = async (rawValue: string): Promise<string> => {
+  const normalized = normalizeGeneratedImageUrl(rawValue);
+  if (!normalized) return "";
+  if (/^https?:\/\//i.test(normalized) || /^data:image\//i.test(normalized)) {
+    return normalized;
+  }
+  return "";
+};
+
+
 const normalizeGeneratedImageUrl = (rawValue: string): string => {
   const value = String(rawValue || "").trim();
   if (!value) return "";
@@ -60,15 +125,22 @@ type ModelslabImageSource = {
   maskImage: string;
   useBase64Input: boolean;
   dataUrl: string;
+  maskBase64: string;
+  invertedMaskBase64: string;
 };
 
 const resolveModelslabImageSource = async (image: ProductImageData): Promise<ModelslabImageSource> => {
+  const { backgroundMaskBase64, invertedMaskBase64 } = await createEditMasks(image);
+  const maskBase64 = backgroundMaskBase64;
+
   if (!BLOB_TOKEN) {
     return {
       initImage: image.data,
-      maskImage: image.data,
+      maskImage: maskBase64,
       useBase64Input: true,
-      dataUrl: toDataUrl(image)
+      dataUrl: toDataUrl(image),
+      maskBase64,
+      invertedMaskBase64
     };
   }
 
@@ -88,16 +160,20 @@ const resolveModelslabImageSource = async (image: ProductImageData): Promise<Mod
 
     return {
       initImage: uploadedUrl,
-      maskImage: uploadedUrl,
-      useBase64Input: false,
-      dataUrl: toDataUrl(image)
+      maskImage: maskBase64,
+      useBase64Input: true,
+      dataUrl: toDataUrl(image),
+      maskBase64,
+      invertedMaskBase64
     };
   } catch {
     return {
       initImage: image.data,
-      maskImage: image.data,
+      maskImage: maskBase64,
       useBase64Input: true,
-      dataUrl: toDataUrl(image)
+      dataUrl: toDataUrl(image),
+      maskBase64,
+      invertedMaskBase64
     };
   }
 };
@@ -138,13 +214,13 @@ const requestModelslabInpaint = async (
   imageSource: ModelslabImageSource,
   payloadBase: Record<string, any>
 ): Promise<any> => {
-  const variants = imageSource.useBase64Input
-    ? [
-        { init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: true },
-        { init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: "true" },
-        { init_image: imageSource.dataUrl, mask_image: imageSource.dataUrl, base64: true }
-      ]
-    : [{ init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: false }];
+  const variants = [
+    { init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: true },
+    { init_image: imageSource.initImage, mask_image: imageSource.maskImage, base64: "true" },
+    { init_image: imageSource.dataUrl, mask_image: base64ToDataUrl(imageSource.maskBase64), base64: true },
+    { init_image: imageSource.initImage, mask_image: imageSource.invertedMaskBase64, base64: true },
+    { init_image: imageSource.dataUrl, mask_image: base64ToDataUrl(imageSource.invertedMaskBase64), base64: true }
+  ];
 
   let lastError = "";
 
@@ -161,7 +237,7 @@ const requestModelslabInpaint = async (
     }
 
     lastError = String(result.error || result.message || `HTTP ${res.status}`);
-    if (!/valid url when base64 is a representation of false/i.test(lastError)) {
+    if (!/valid url when base64 is a representation of false|init image|mask image/i.test(lastError)) {
       throw new Error(lastError);
     }
   }
@@ -220,8 +296,8 @@ export const generateInpaintedImage = async (
       safety_checker: "no"
     });
 
-    const generatedUrl = normalizeGeneratedImageUrl(result.output?.[0] || result.proxy_links?.[0] || "");
-    if (!generatedUrl || (!/^https?:\/\//i.test(generatedUrl) && !/^data:image\//i.test(generatedUrl))) {
+    const generatedUrl = await ensureRenderableImageUrl(result.output?.[0] || result.proxy_links?.[0] || "");
+    if (!generatedUrl) {
       throw new Error(result?.message || "ModelsLab 이미지 URL이 반환되지 않았습니다.");
     }
 
