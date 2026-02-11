@@ -1,7 +1,6 @@
 export const config = { runtime: "nodejs" };
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { GoogleGenAI } from "@google/genai";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -15,29 +14,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY missing" });
 
-    const ai = new GoogleGenAI({ apiKey });
+    // ✅ 모델명: "models/" 붙이지 말 것
+    // 필요하면 "gemini-1.5-flash-latest"로 바꿔도 됨
+    const model = "gemini-1.5-flash";
 
-    // ✅ systemInstruction을 타입 안전하게 "프롬프트에 합쳐서" 전달
+    // ✅ systemInstruction은 프롬프트에 합치기(호환성 최고)
     const finalPrompt = systemInstruction
       ? `SYSTEM INSTRUCTION:\n${systemInstruction}\n\nUSER:\n${userPrompt}`
       : userPrompt;
 
-    const resp = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
-      generationConfig: {
-        temperature: 0.3,
-        responseMimeType: "application/json"
-      }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: finalPrompt }],
+          },
+        ],
+        // ✅ 여기서는 타입 에러 없음 (REST라 TS 타입 무관)
+        generationConfig: {
+          temperature: 0.3,
+        },
+      }),
     });
 
-    const text =
-      (resp as any)?.text ??
-      (resp as any)?.response?.text?.() ??
-      (resp as any)?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).join("") ??
-      "";
+    const json = await resp.json();
 
-    if (!text) return res.status(500).json({ error: "Empty Gemini response" });
+    if (!resp.ok) {
+      return res.status(resp.status).json(json);
+    }
+
+    const text =
+      json?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).join("") ?? "";
+
+    if (!text) return res.status(500).json({ error: "Empty Gemini response", raw: json });
 
     return res.status(200).send(text);
   } catch (e: any) {
