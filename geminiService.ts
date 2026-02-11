@@ -4,6 +4,9 @@ const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 const BLOB_TOKEN = import.meta.env.VITE_BLOB_READ_WRITE_TOKEN;
 
+/**
+ * [함수 1] ModelsLab 배경 합성
+ */
 export const generateInpaintedImage = async (imageURL: string, inputs: BlogInputs, index: number, nanoPrompt: string): Promise<ImageResult> => {
   if (!MODELSLAB_KEY) return { url: '', filename: '', description: 'Key Missing', nanoPrompt: '' };
   try {
@@ -22,10 +25,13 @@ export const generateInpaintedImage = async (imageURL: string, inputs: BlogInput
   } catch { return { url: '', filename: 'failed.png', description: '이미지 실패', nanoPrompt: '' }; }
 };
 
+/**
+ * [함수 2] 1500자+ 블로그 생성 (최소한의 설정으로 에러 방지)
+ */
 export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> => {
   if (!GEMINI_KEY) throw new Error("API 키를 확인하세요.");
 
-  // 💡 가장 범용적인 v1beta 주소로 복구하되, 에러를 유발하는 config를 삭제함
+  // 💡 가장 범용적인 v1beta 주소를 사용하되, 에러를 유발하는 모든 config를 제거했습니다.
   const URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
 
   const response = await fetch(URL, {
@@ -34,10 +40,9 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
     body: JSON.stringify({
       contents: [{ 
         parts: [{ 
-          text: `당신은 네이버 블로그 SEO 전문가입니다. "${inputs.productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${inputs.mainKeyword}"로 시작하고 본문에 비교 표를 포함하세요. 반드시 JSON 형식으로만 답하세요: {"title": "제목", "body": "1500자 본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}` 
+          text: `당신은 네이버 블로그 SEO 전문가입니다. "${inputs.productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${inputs.mainKeyword}"로 시작하고 본문에 비교 표를 포함하세요. 반드시 다음의 순수 JSON 형식으로만 답하세요(기호 포함 금지): {"title": "제목", "body": "1500자 본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}` 
         }] 
       }]
-      // 💡 에러 원인이었던 generationConfig(response_mime_type 등)를 완전히 제거함
     })
   });
 
@@ -46,11 +51,11 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
 
   let rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
   
-  // 마크다운 기호 제거 로직 (JSON만 추출)
+  // 💡 마크다운 기호(```json)가 섞여 나올 경우를 대비한 텍스트 정제
   const cleanJsonText = rawText.replace(/```json|```/g, "").trim();
   const blogData = JSON.parse(cleanJsonText);
 
-  // Vercel Blob 사진 업로드
+  // Vercel Blob 사진 업로드 (라이브러리 없이 직접 통신)
   let productUrl = "";
   if (inputs.productImages?.[0]?.data && BLOB_TOKEN) {
     try {
