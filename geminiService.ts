@@ -143,11 +143,29 @@ const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMas
   };
 };
 
+const requestImageProxyDataUrl = async (url: string): Promise<string> => {
+  const response = await fetch("/api/image-proxy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url })
+  });
+
+  const result = await response.json();
+  if (!response.ok || !result?.dataUrl) {
+    throw new Error(result?.error || "이미지 프록시 변환 실패");
+  }
+
+  return String(result.dataUrl);
+};
+
 const ensureRenderableImageUrl = async (rawValue: string): Promise<string> => {
   const normalized = normalizeGeneratedImageUrl(rawValue);
   if (!normalized) return "";
-  if (/^https?:\/\//i.test(normalized) || /^data:image\//i.test(normalized)) {
+  if (/^data:image\//i.test(normalized)) {
     return normalized;
+  }
+  if (/^https?:\/\//i.test(normalized)) {
+    return await requestImageProxyDataUrl(normalized);
   }
   return "";
 };
@@ -235,6 +253,7 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
       contentOnly,
       productName: inputs.productName,
       mainKeyword: inputs.mainKeyword,
+      subKeywords: inputs.subKeywords,
       generationMode: inputs.generationMode
     })
   });

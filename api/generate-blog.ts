@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMINI_MODEL;
-const SERVER_MARKER = "server-fallback-v5";
+const SERVER_MARKER = "server-fallback-v6";
 
 const PREFERRED_GEMINI_MODELS = [
   GEMINI_MODEL,
@@ -165,8 +165,34 @@ const parseGeminiJson = (rawText: string): { title: string; body: string; imageP
 
 
 const normalizeBlogBody = (body: string): string => {
-  const withoutBold = body.replace(/\*\*/g, "");
-  return withoutBold.trim();
+  const withoutBold = body.replace(/\*\*/g, "").trim();
+  return withoutBold;
+};
+
+const enforceTitleAndIntro = (title: string, body: string, mainKeyword: string, subKeywords: string): { title: string; body: string } => {
+  const cleanedTitle = String(title || "").replace(/\*\*/g, "").trim();
+  const firstSub = String(subKeywords || "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean)[0] || "";
+
+  let constrained = cleanedTitle;
+  if (!constrained.startsWith(mainKeyword)) {
+    constrained = `${mainKeyword} ${constrained}`.trim();
+  }
+  if (firstSub && !constrained.includes(firstSub)) {
+    constrained = `${constrained} ${firstSub}`.trim();
+  }
+  if (constrained.length > 20) {
+    constrained = constrained.slice(0, 20).trim();
+  }
+
+  const cleanBody = normalizeBlogBody(body);
+  const intro = `${constrained}.`;
+  const mergedBody = cleanBody.startsWith(constrained) ? cleanBody : `${intro}
+
+${cleanBody}`;
+  return { title: constrained, body: mergedBody };
 };
 
 
@@ -251,10 +277,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { contentOnly, productName, mainKeyword } = req.body || {};
+    const { contentOnly, productName, mainKeyword, subKeywords } = req.body || {};
     const prompt = contentOnly
-      ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}. 본문은 1,500자 이상으로 작성하고 네이버 SEO와 GEO 최적화를 반영하세요. 절대로 마크다운 굵게(**) 표기를 사용하지 마세요.`
-      : `당신은 네이버 SEO/GEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${mainKeyword}"로 시작하고 검색 의도, 구매 의도, 지역 맥락을 반영한 실전형 구조로 작성하세요. 소제목과 본문 어디에도 마크다운 굵게(**)를 사용하지 마세요.`;
+      ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}, 서브 키워드: ${subKeywords}. 본문은 1,500자 이상으로 작성하고 네이버 SEO/AEO 최적화를 반영하세요. 절대로 마크다운 굵게(**) 표기를 사용하지 마세요.`
+      : `당신은 네이버 SEO/AEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 반드시 20자 이내, "${mainKeyword}"로 시작하고 서브 키워드(${subKeywords})를 자연스럽게 포함하세요. 본문 첫 문장은 제목과 동일 문장으로 시작해야 합니다. 소제목과 본문 어디에도 마크다운 굵게(**)를 사용하지 마세요.`;
 
     const result = await generateWithFallback(
       `${prompt}\n반드시 순수 JSON으로만 응답하세요: {"title": "제목", "body": "본문", "imagePrompts": [{"nanoPrompt": "English keywords", "description": "image intent"}]}`
@@ -263,11 +289,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = parseGeminiJson(rawText);
 
-    const normalizedBody = normalizeBlogBody(parsed.body);
+    const enforced = enforceTitleAndIntro(String(parsed.title || ""), String(parsed.body || ""), String(mainKeyword || ""), String(subKeywords || ""));
 
     return res.status(200).json({
-      title: String(parsed.title || "").replace(/\*\*/g, "").trim(),
-      body: normalizedBody,
+      title: enforced.title,
+      body: enforced.body,
       imagePrompts: parsed.imagePrompts,
       marker: SERVER_MARKER
     });
