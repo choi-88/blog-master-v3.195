@@ -161,6 +161,13 @@ const parseGeminiJson = (rawText: string): { title: string; body: string; imageP
   };
 };
 
+
+
+const normalizeBlogBody = (body: string): string => {
+  const withoutBold = body.replace(/\*\*/g, "");
+  return withoutBold.trim();
+};
+
 const generateWithFallback = async (promptText: string) => {
   const attempts: string[] = [];
   let lastError = "";
@@ -215,19 +222,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { contentOnly, productName, mainKeyword } = req.body || {};
     const prompt = contentOnly
-      ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}`
-      : `당신은 네이버 블로그 SEO 전문가입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${mainKeyword}"로 시작하고 본문에 비교 표를 포함하세요.`;
+      ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}. 본문은 1,500자 이상으로 작성하고 네이버 SEO와 GEO 최적화를 반영하세요. 절대로 마크다운 굵게(**) 표기를 사용하지 마세요.`
+      : `당신은 네이버 SEO/GEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 "${mainKeyword}"로 시작하고 검색 의도, 구매 의도, 지역 맥락을 반영한 실전형 구조로 작성하세요. 소제목과 본문 어디에도 마크다운 굵게(**)를 사용하지 마세요.`;
 
     const result = await generateWithFallback(
-      `${prompt}\n반드시 순수 JSON으로만 응답하세요: {"title": "제목", "body": "본문", "imagePrompts": [{"nanoPrompt": "English keywords"}]}`
+      `${prompt}\n반드시 순수 JSON으로만 응답하세요: {"title": "제목", "body": "본문", "imagePrompts": [{"nanoPrompt": "English keywords", "description": "image intent"}]}`
     );
 
     const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text || "";
     const parsed = parseGeminiJson(rawText);
 
+    const normalizedBody = normalizeBlogBody(parsed.body);
+
     return res.status(200).json({
-      title: parsed.title,
-      body: parsed.body,
+      title: String(parsed.title || "").replace(/\*\*/g, "").trim(),
+      body: normalizedBody,
       imagePrompts: parsed.imagePrompts,
       marker: SERVER_MARKER
     });

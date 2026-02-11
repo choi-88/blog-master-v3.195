@@ -3,6 +3,7 @@ import { BlogInputs, BlogPost, ImageResult, ProductImageData } from "./types";
 const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 const BLOB_TOKEN = import.meta.env.VITE_BLOB_READ_WRITE_TOKEN;
 const CLIENT_BUILD_MARKER = "client-api-proxy-v1";
+const MODELSLAB_IMAGE_MODEL = "flux-kontext-dev";
 
 const safeJsonParse = <T>(text: string): T => {
   const normalized = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
@@ -18,14 +19,25 @@ const DEFAULT_PERSONA = {
   contentFlow: ""
 };
 
+
+const buildImageRequests = (
+  prompts: Array<{ nanoPrompt?: string; description?: string }> | undefined,
+  targetImageCount: number,
+  mainKeyword: string
+): Array<{ nanoPrompt?: string; description?: string }> => {
+  return Array.from({ length: targetImageCount }, (_, idx) => {
+    const prompt = prompts?.[idx] || {};
+    return {
+      nanoPrompt:
+        prompt.nanoPrompt ||
+        `Korean commercial product photo, ${mainKeyword}, realistic lighting, clean composition, high detail`,
+      description: prompt.description || `AI 배경 합성 이미지 ${idx + 1}`
+    };
+  });
+};
+
 const toDataUrl = (image: ProductImageData): string => `data:${image.mimeType};base64,${image.data}`;
 
-const fallbackImageResult = (image: ProductImageData, index: number, nanoPrompt = ""): ImageResult => ({
-  url: toDataUrl(image),
-  filename: `source_${index + 1}.png`,
-  description: "원본 상품 이미지(합성 실패 시 대체)",
-  nanoPrompt
-});
 
 const uploadToVercelBlob = async (image: ProductImageData): Promise<string> => {
   if (!BLOB_TOKEN) {
@@ -75,7 +87,7 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
     throw new Error(`콘텐츠 API 응답 형식 오류(${CLIENT_BUILD_MARKER})`);
   }
 
-  return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string }> };
+  return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string; description?: string }> };
 };
 
 /**
@@ -93,7 +105,7 @@ export const generateInpaintedImage = async (
   personaHint: string
 ): Promise<ImageResult> => {
   if (!MODELSLAB_KEY) {
-    return fallbackImageResult(image, index, imageRequest.nanoPrompt || "");
+    throw new Error("ModelsLab API 키가 설정되지 않았습니다.");
   }
 
   try {
@@ -116,6 +128,8 @@ export const generateInpaintedImage = async (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         key: MODELSLAB_KEY,
+        model_id: MODELSLAB_IMAGE_MODEL,
+        model: MODELSLAB_IMAGE_MODEL,
         prompt: composedPrompt,
         negative_prompt: "blurry, low resolution, watermark, text",
         init_image: initImage,
@@ -131,7 +145,7 @@ export const generateInpaintedImage = async (
 
     const generatedUrl = result.output?.[0] || result.proxy_links?.[0] || "";
     if (!generatedUrl) {
-      return fallbackImageResult(image, index, imageRequest.nanoPrompt || "");
+      throw new Error(result?.message || "ModelsLab 이미지 URL이 반환되지 않았습니다.");
     }
 
     return {
@@ -140,8 +154,8 @@ export const generateInpaintedImage = async (
       description: imageRequest.description || "AI 합성 이미지",
       nanoPrompt: imageRequest.nanoPrompt || ""
     };
-  } catch {
-    return fallbackImageResult(image, index, imageRequest.nanoPrompt || "");
+  } catch (error: any) {
+    throw new Error(`이미지 합성 실패(#${index + 1}): ${error?.message || "unknown error"}`);
   }
 };
 
@@ -153,24 +167,26 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
 
   const finalImages: ImageResult[] = [];
   if (!contentOnly && inputs.productImages?.length) {
-    const firstImageRequest = {
-      nanoPrompt: blogData.imagePrompts?.[0]?.nanoPrompt || "",
-      description: "AI 합성"
-    };
+    const targetImageCount = Math.max(1, inputs.targetImageCount || 1);
+    const imageRequests = buildImageRequests(blogData.imagePrompts, targetImageCount, inputs.mainKeyword || inputs.productName);
 
-    const imgRes = await generateInpaintedImage(
-      inputs.productImages[0],
-      inputs.backgroundLocation,
-      inputs.backgroundColor,
-      inputs.backgroundMaterial,
-      inputs.backgroundDish,
-      firstImageRequest,
-      0,
-      inputs.mainKeyword || inputs.productName,
-      inputs.persona.targetAudience || "일반 소비자"
+    const generatedImages = await Promise.all(
+      imageRequests.map((imageRequest, index) =>
+        generateInpaintedImage(
+          inputs.productImages[index % inputs.productImages.length],
+          inputs.backgroundLocation,
+          inputs.backgroundColor,
+          inputs.backgroundMaterial,
+          inputs.backgroundDish,
+          imageRequest,
+          index,
+          inputs.mainKeyword || inputs.productName,
+          inputs.persona.targetAudience || "일반 소비자"
+        )
+      )
     );
 
-    finalImages.push(imgRes);
+    finalImages.push(...generatedImages);
   }
 
   return {
