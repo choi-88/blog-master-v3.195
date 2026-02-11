@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMINI_MODEL;
-const SERVER_MARKER = "server-fallback-v2";
+const SERVER_MARKER = "server-fallback-v3";
 
 const PREFERRED_GEMINI_MODELS = [
   GEMINI_MODEL,
@@ -70,6 +70,12 @@ const sanitizeJsonText = (input: string): string => {
     const ch = sliced[i];
 
     if (!inString) {
+      const code = ch.charCodeAt(0);
+      if (code < 0x20 && ch !== "\n" && ch !== "\r" && ch !== "\t") {
+        out += " ";
+        continue;
+      }
+
       if (ch === '"') {
         inString = true;
       }
@@ -123,8 +129,26 @@ const sanitizeJsonText = (input: string): string => {
 };
 
 const parseGeminiJson = (rawText: string): { title: string; body: string; imagePrompts: Array<{ nanoPrompt?: string }> } => {
-  const sanitized = sanitizeJsonText(rawText);
-  const parsed = JSON.parse(sanitized);
+  const attempts = [
+    sanitizeJsonText(rawText),
+    sanitizeJsonText(rawText).replace(/\u0000|\u0001|\u0002|\u0003|\u0004|\u0005|\u0006|\u0007|\u0008|\u000b|\u000c|\u000e|\u000f|\u0010|\u0011|\u0012|\u0013|\u0014|\u0015|\u0016|\u0017|\u0018|\u0019|\u001a|\u001b|\u001c|\u001d|\u001e|\u001f/g, " ")
+  ];
+
+  let parsed: any = null;
+  let lastParseError = "";
+
+  for (const candidate of attempts) {
+    try {
+      parsed = JSON.parse(candidate);
+      break;
+    } catch (error: any) {
+      lastParseError = error?.message || "unknown parse error";
+    }
+  }
+
+  if (!parsed) {
+    throw new Error(`Gemini JSON 파싱 실패: ${lastParseError}`);
+  }
 
   if (!parsed?.title || !parsed?.body) {
     throw new Error("Gemini JSON 응답에 title/body가 없습니다.");

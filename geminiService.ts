@@ -4,6 +4,11 @@ const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 const BLOB_TOKEN = import.meta.env.VITE_BLOB_READ_WRITE_TOKEN;
 const CLIENT_BUILD_MARKER = "client-api-proxy-v1";
 
+const safeJsonParse = <T>(text: string): T => {
+  const normalized = text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ");
+  return JSON.parse(normalized) as T;
+};
+
 const DEFAULT_PERSONA = {
   targetAudience: "",
   painPoint: "",
@@ -46,7 +51,15 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
     })
   });
 
-  const result = await response.json();
+  const rawResponseText = await response.text();
+  let result: any = null;
+
+  try {
+    result = safeJsonParse(rawResponseText);
+  } catch (error: any) {
+    throw new Error(`콘텐츠 API JSON 파싱 오류(${CLIENT_BUILD_MARKER}): ${error?.message || "unknown"}`);
+  }
+
   if (!response.ok) {
     throw new Error(result?.error || `콘텐츠 API 오류(${CLIENT_BUILD_MARKER})`);
   }
