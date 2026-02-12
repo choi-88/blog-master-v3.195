@@ -598,6 +598,25 @@ const analyzeObjectFromImage = async (
   }
 };
 
+const extractModelslabRequestIds = (result: any): string[] => {
+  const candidates = [
+    result?.id,
+    result?.request_id,
+    result?.task_id,
+    result?.meta?.request_id,
+    result?.meta?.id,
+    result?.data?.id,
+    result?.data?.request_id,
+    result?.fetch_result?.id,
+    result?.fetch_result?.request_id
+  ];
+
+  return candidates
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+};
+
 const requestModelslabFetchResult = async (apiKey: string, requestId: string): Promise<any> => {
   const res = await fetch("https://modelslab.com/api/v6/images/fetch", {
     method: "POST",
@@ -653,17 +672,20 @@ const requestModelslabInpaint = async (
         return { output: [directResolved] };
       }
 
-      const requestId = String(result?.id || result?.request_id || "");
-      if (requestId && String(payloadBase?.key || "")) {
-        for (let i = 0; i < 30; i += 1) {
-          await new Promise((r) => setTimeout(r, 1200));
-          const fetched = await requestModelslabFetchResult(String(payloadBase.key), requestId);
-          const fetchedResolved = await tryResolveRenderableFromModelslabResult(fetched);
-          if (fetchedResolved) {
-            return { output: [fetchedResolved] };
-          }
-          if (String(fetched?.status || "").toLowerCase() === "failed") {
-            throw new Error(String(fetched?.error || fetched?.message || "ModelsLab fetch failed"));
+      const requestIds = extractModelslabRequestIds(result);
+      if (requestIds.length && String(payloadBase?.key || "")) {
+        for (const requestId of requestIds) {
+          for (let i = 0; i < 30; i += 1) {
+            await new Promise((r) => setTimeout(r, 1200));
+            const fetched = await requestModelslabFetchResult(String(payloadBase.key), requestId);
+            const fetchedResolved = await tryResolveRenderableFromModelslabResult(fetched);
+            if (fetchedResolved) {
+              return { output: [fetchedResolved] };
+            }
+            if (String(fetched?.status || "").toLowerCase() === "failed") {
+              lastError = String(fetched?.error || fetched?.message || "ModelsLab fetch failed");
+              break;
+            }
           }
         }
       }
@@ -677,11 +699,12 @@ const requestModelslabInpaint = async (
         }
       }
 
-      throw new Error(String(result?.message || "ModelsLab 출력 이미지를 찾지 못했습니다."));
+      lastError = String(result?.message || "ModelsLab 출력 이미지를 찾지 못했습니다.");
+      continue;
     }
 
     lastError = String(result.error || result.message || `HTTP ${res.status}`);
-    if (!/valid url when base64 is a representation of false|init image|mask image/i.test(lastError)) {
+    if (!/valid url when base64 is a representation of false|init image|mask image|processing|queued|pending/i.test(lastError)) {
       throw new Error(lastError);
     }
   }
