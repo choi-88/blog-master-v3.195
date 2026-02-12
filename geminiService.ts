@@ -268,7 +268,13 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
       subKeywords: inputs.subKeywords,
       productLink: inputs.productLink,
       referenceLink: inputs.referenceLink,
-      geminiApiKey: settings.geminiApiKey
+      geminiApiKey: settings.geminiApiKey,
+      persona: inputs.persona,
+      backgroundLocation: inputs.backgroundLocation,
+      backgroundColor: inputs.backgroundColor,
+      backgroundMaterial: inputs.backgroundMaterial,
+      backgroundDish: inputs.backgroundDish,
+      dishImageCount: inputs.dishImageCount
     })
   });
 
@@ -470,6 +476,51 @@ const requestReplicateImageEdit = async (
   throw new Error("Replicate 응답 타임아웃");
 };
 
+
+const composeBackgroundInpaintPrompt = (params: {
+  objectProfile: ObjectProfile;
+  imageRequest: { nanoPrompt?: string; description?: string };
+  mainKeyword: string;
+  backgroundLocation: string;
+  backgroundColor: string;
+  backgroundMaterial: string;
+  backgroundDish: string;
+  personaHint: string;
+}): string => {
+  const {
+    objectProfile,
+    imageRequest,
+    mainKeyword,
+    backgroundLocation,
+    backgroundColor,
+    backgroundMaterial,
+    backgroundDish,
+    personaHint
+  } = params;
+
+  const targetDescription = [
+    `Background scene: ${backgroundLocation}`,
+    `Color mood: ${backgroundColor}`,
+    `Surface material: ${backgroundMaterial}`,
+    `Dish styling: ${backgroundDish}`,
+    imageRequest.nanoPrompt || imageRequest.description || ''
+  ]
+    .filter(Boolean)
+    .join('. ');
+
+  return [
+    'Task: In-painting / Background Replacement',
+    `Subject Preservation: Keep the identified object (${objectProfile.objectName}) 100% intact. Never alter object silhouette, label text, logo, package typography, color, texture, geometry, or material identity.`,
+    'Mask Area: Apply changes ONLY to the area outside the object mask. Object-mask pixels must remain untouched.',
+    `Target Description: ${targetDescription}.`,
+    'Consistency: Match lighting direction and intensity to the new scene and apply only natural global relighting (brightness, soft reflections, subtle color cast) on the object. No object repainting.',
+    `Framing: ${objectProfile.framingHint}. Keep a natural handheld iPhone 14 Pro product-photo aesthetic.`,
+    'Quality: High resolution, photorealistic texture, seamless blending, no artifacts, no black frame, no duplicated object.',
+    `Keyword Context: main keyword=${mainKeyword}; persona=${personaHint}.`,
+    `Visible product details: ${objectProfile.objectDetails}.`
+  ].join('\n');
+};
+
 /**
  * [함수 1] ModelsLab/Replicate 배경 합성
  */
@@ -499,26 +550,16 @@ export const generateInpaintedImage = async (
   try {
     const imageSource = await resolveModelslabImageSource(image);
     const objectProfile = await analyzeObjectFromImage(image, geminiApiKey, mainKeyword, imageRequest.description || "");
-    const iPhoneStyle = "Shot naturally with iPhone 14 Pro camera look, realistic exposure and colors";
-    const composedPrompt = [
-      "Photorealistic background-only replacement for a product photo",
-      "Keep the uploaded product object pixel-faithful: do not alter shape, logo, label text, color, texture, or geometry.",
-      "Do not redraw or repaint the object; edit only surrounding background area and keep object pixels unchanged.",
-      "Allow only natural global lighting effects on the object: saturation, brightness, soft reflection, and light direction adaptation.",
-      `Primary object: ${objectProfile.objectName}`,
-      `Object details: ${objectProfile.objectDetails}`,
-      `Framing hint: ${objectProfile.framingHint}`,
-      iPhoneStyle,
-      `Main keyword: ${mainKeyword}`,
-      `Scene: ${backgroundLocation}`,
-      `Color mood: ${backgroundColor}`,
-      `Material texture: ${backgroundMaterial}`,
-      `Dish style: ${backgroundDish}`,
-      `Persona hint: ${personaHint}`,
-      imageRequest.nanoPrompt || ""
-    ]
-      .filter(Boolean)
-      .join(", ");
+    const composedPrompt = composeBackgroundInpaintPrompt({
+      objectProfile,
+      imageRequest,
+      mainKeyword,
+      backgroundLocation,
+      backgroundColor,
+      backgroundMaterial,
+      backgroundDish,
+      personaHint
+    });
 
     let generatedRaw = "";
 
