@@ -271,19 +271,64 @@ const createEditMasks = async (image: ProductImageData, modelslabApiKey?: string
         return segmented;
       }
     } catch {
-      // fallback below
+      // keep trying below
     }
   }
 
-  return createRoundedFallbackMasks(size.width, size.height);
+  throw new Error("오브제 누끼 추출 실패: removebg 마스크를 얻지 못했습니다. 다른 원본 사진(대상 오브제 대비가 선명한 이미지)으로 다시 시도해주세요.");
+};
+
+const blobToDataUrl = async (blob: Blob): Promise<string> => {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Blob -> data URL 변환 실패"));
+    reader.readAsDataURL(blob);
+  });
+};
+
+const resolvePossibleImageEndpoint = async (url: string, depth = 0): Promise<string> => {
+  if (depth > 2) return "";
+
+  try {
+    const response = await fetch(url, { headers: { Accept: "image/*,application/json" } });
+    if (!response.ok) return "";
+
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    if (contentType.startsWith("image/")) {
+      const blob = await response.blob();
+      return await blobToDataUrl(blob);
+    }
+
+    if (contentType.includes("application/json") || contentType.includes("text/plain")) {
+      const payload = await response.json().catch(() => null);
+      const nested = normalizeGeneratedImageUrl(extractModelslabImageValue(payload));
+      if (nested && nested !== url) {
+        return /^https?:\/\//i.test(nested)
+          ? await resolvePossibleImageEndpoint(nested, depth + 1)
+          : nested;
+      }
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
 };
 
 const ensureRenderableImageUrl = async (rawValue: string): Promise<string> => {
   const normalized = normalizeGeneratedImageUrl(rawValue);
   if (!normalized) return "";
-  if (/^https?:\/\//i.test(normalized) || /^data:image\//i.test(normalized)) {
+
+  if (/^data:image\//i.test(normalized)) {
     return normalized;
   }
+
+  if (/^https?:\/\//i.test(normalized)) {
+    const resolved = await resolvePossibleImageEndpoint(normalized);
+    return resolved || normalized;
+  }
+
   return "";
 };
 
@@ -515,7 +560,12 @@ const requestModelslabInpaint = async (
       }
 
       if (result?.future_links?.length) {
-        return { output: [result.future_links[0]] };
+        for (const future of result.future_links) {
+          const resolved = await ensureRenderableImageUrl(String(future || ""));
+          if (resolved) {
+            return { output: [resolved] };
+          }
+        }
       }
 
       throw new Error(String(result?.message || "ModelsLab 출력 이미지를 찾지 못했습니다."));
@@ -648,6 +698,10 @@ const composeBackgroundInpaintPrompt = (params: {
     `Subject Preservation: Keep the identified object (${objectProfile.objectName}) 100% intact. Never alter object silhouette, label text, logo, package typography, color, texture, geometry, or material identity.`,
     'Mask Area: Apply changes ONLY to the area outside the object mask. Object-mask pixels must remain untouched.',
     `Target Description: ${targetDescription}.`,
+    'Rule Interpretation: dish_count means number of final images that should include plated composition (not number of dishes inside one image).',
+    'Rule Interpretation: color mood controls global saturation/brightness and tone, not object recoloring.',
+    'Rule Interpretation: material is the background floor/table texture; dish style applies only for food-product plating scenes.',
+    'Rule Interpretation: location is the full scene theme for the product environment.',
     'Consistency: Match lighting direction and intensity to the new scene and apply only natural global relighting (brightness, soft reflections, subtle color cast) on the object. No object repainting.',
     `Framing: ${objectProfile.framingHint}. Keep a natural handheld iPhone 14 Pro product-photo aesthetic.`,
     'Quality: High resolution, photorealistic texture, seamless blending, no artifacts, no black frame, no duplicated object.',
@@ -750,7 +804,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
     const imageRequests = buildImageRequests(blogData.imagePrompts, targetImageCount, inputs.mainKeyword || inputs.productName)
       .map((req, idx) => ({
         ...req,
-        nanoPrompt: `${req.nanoPrompt || ""}, dish_count:${idx < inputs.dishImageCount ? "with dish" : "without dish"}, selected_dish:${inputs.backgroundDish}, material:${inputs.backgroundMaterial}, color:${inputs.backgroundColor}, location:${inputs.backgroundLocation}`
+        nanoPrompt: `${req.nanoPrompt || ""}, uploaded_subject:${inputs.productName || inputs.mainKeyword}, dish_image_mode:${idx < inputs.dishImageCount ? "with_dish" : "without_dish"}, dish_style:${inputs.backgroundDish}, table_or_floor_material:${inputs.backgroundMaterial}, global_saturation_mood:${inputs.backgroundColor}, full_scene_location:${inputs.backgroundLocation}`
       }));
 
     const randomOrder = getRandomImageIndexOrder(inputs.productImages.length);
