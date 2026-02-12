@@ -791,6 +791,56 @@ export const generateInpaintedImage = async (
   }
 };
 
+const generateImageWithFallbackSources = async (params: {
+  imageRequest: { nanoPrompt?: string; description?: string };
+  outputIndex: number;
+  inputs: BlogInputs;
+  settings: ReturnType<typeof resolveApiSettings>;
+  sourceOrder: number[];
+}): Promise<ImageResult> => {
+  const { imageRequest, outputIndex, inputs, settings, sourceOrder } = params;
+  let lastError = "";
+
+  for (let offset = 0; offset < sourceOrder.length; offset += 1) {
+    const sourceIndex = sourceOrder[(outputIndex + offset) % sourceOrder.length];
+    const selectedImage = inputs.productImages[sourceIndex];
+    if (!selectedImage) continue;
+
+    try {
+      const generated = await generateInpaintedImage(
+        selectedImage,
+        inputs.backgroundLocation,
+        inputs.backgroundColor,
+        inputs.backgroundMaterial,
+        inputs.backgroundDish,
+        imageRequest,
+        outputIndex,
+        inputs.mainKeyword || inputs.productName,
+        inputs.persona.targetAudience || "일반 소비자",
+        settings.imageProvider,
+        settings.imageModel,
+        settings.modelslabApiKey,
+        settings.replicateApiKey,
+        settings.geminiApiKey
+      );
+
+      return {
+        ...generated,
+        description: `${generated.description} [source_index=${sourceIndex}]`
+      };
+    } catch (error: any) {
+      lastError = String(error?.message || "unknown error");
+      const maskFailure = /누끼 추출 실패|removebg mask|removebg 마스크|object cutout failed/i.test(lastError);
+      if (!maskFailure) {
+        throw error;
+      }
+      // try next uploaded source image when object mask extraction fails
+    }
+  }
+
+  throw new Error(`이미지 합성 실패(#${outputIndex + 1}): 업로드된 모든 이미지(${sourceOrder.length}장)에서 누끼 추출에 실패했습니다. 배경 대비가 더 분명한 원본을 포함해 다시 시도해주세요. 마지막 오류: ${lastError}`);
+};
+
 /**
  * [함수 2] 블로그 생성
  */
@@ -809,31 +859,15 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
 
     const randomOrder = getRandomImageIndexOrder(inputs.productImages.length);
     const generatedImages = await Promise.all(
-      imageRequests.map(async (imageRequest, index) => {
-        const sourceIndex = randomOrder[index % randomOrder.length];
-        const selectedImage = inputs.productImages[sourceIndex];
-        const generated = await generateInpaintedImage(
-          selectedImage,
-          inputs.backgroundLocation,
-          inputs.backgroundColor,
-          inputs.backgroundMaterial,
-          inputs.backgroundDish,
+      imageRequests.map((imageRequest, index) =>
+        generateImageWithFallbackSources({
           imageRequest,
-          index,
-          inputs.mainKeyword || inputs.productName,
-          inputs.persona.targetAudience || "일반 소비자",
-          settings.imageProvider,
-          settings.imageModel,
-          settings.modelslabApiKey,
-          settings.replicateApiKey,
-          settings.geminiApiKey
-        );
-
-        return {
-          ...generated,
-          description: `${generated.description} [source_index=${sourceIndex}]`
-        };
-      })
+          outputIndex: index,
+          inputs,
+          settings,
+          sourceOrder: randomOrder
+        })
+      )
     );
 
     finalImages.push(...generatedImages);
