@@ -4,7 +4,7 @@ const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const MODELSLAB_KEY = import.meta.env.VITE_MODELSLAB_API_KEY;
 const BLOB_TOKEN = import.meta.env.VITE_BLOB_READ_WRITE_TOKEN;
 
-const TEXT_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"];
+const TEXT_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash-latest"];
 const toDataUrl = (mimeType: string, base64Data: string) => `data:${mimeType};base64,${base64Data}`;
 const stripCodeFence = (text: string) => text.replace(/```json|```/g, "").trim();
 
@@ -25,7 +25,47 @@ const buildFallbackBlog = (inputs: BlogInputs): BlogPost => {
   const requiredImageCount = Math.max(1, inputs.targetImageCount || 1);
   return {
     title: `${keyword} 제대로 고르는 방법과 추천 포인트`,
-    content: `${inputs.productName}을(를) 찾는 분들이 가장 많이 고민하는 부분은 성능, 가격, 실제 사용 만족도입니다.\n\n이 글에서는 ${inputs.productName}의 핵심 특징을 쉽게 정리했습니다. 먼저 어떤 상황에서 필요한지 체크하고, 다음으로 구매 전에 확인해야 할 요소를 비교해서 설명합니다. 특히 ${inputs.subKeywords || "실사용 후기, 장단점, 활용 팁"} 관점에서 정리했기 때문에 초보자도 빠르게 이해할 수 있습니다.\n\n### 1) 구매 전 체크리스트\n- 사용 목적과 환경\n- 예산 대비 성능\n- 유지 관리 편의성\n\n### 2) ${inputs.productName} 추천 이유\n- 사용자 니즈에 맞춘 실용성\n- 핵심 기능 중심 구성\n- 구매 후 활용도가 높음\n\n### 3) 활용 팁\n처음 사용할 때는 기본 기능부터 익히고, 자주 쓰는 기능을 중심으로 루틴을 만드는 것이 좋습니다.\n\n지금 바로 ${inputs.productName} 상세 페이지를 확인하고, 현재 진행 중인 혜택도 함께 확인해보세요.`,
+    content: `${inputs.mainKeyword || inputs.productName}를 고를 때 가장 많이 생기는 질문은 "어떤 기준으로 비교해야 실패가 없을까?"입니다. 결론부터 말하면 제품의 사용 목적, 원재료/구성, 보관 편의성, 선물 적합성, 가격 대비 만족도를 함께 봐야 합니다. 특히 ${inputs.subKeywords || "실사용 후기, 장단점, 활용 팁"} 관점에서 기준을 세우면 검색만 많이 하고 결정을 못 내리는 상황을 줄일 수 있습니다.
+
+## ${inputs.mainKeyword || inputs.productName} 구매 전 핵심 체크포인트
+${inputs.productName}은(는) 단순히 가격만 비교하면 만족도가 떨어질 수 있습니다. 아래 항목은 네이버 검색에서 자주 묻는 질문과 실제 구매 후기를 기준으로 정리한 기본 체크리스트입니다.
+
+- **사용 상황 확인**: 집에서 상시 소비인지, 선물용인지 먼저 구분
+- **구성/중량 확인**: 세트 구성, 개별 포장 여부, 보관 난이도 확인
+- **식감/취향 확인**: 촉촉함, 당도, 크기 편차 등 개인 취향 요소 확인
+- **배송 안정성**: 파손 방지 포장, 아이스/완충 포장 여부 확인
+- **재구매 요소**: 가족 반응, 선물 만족도, 보관 편의성
+
+## 비교 기준 표 (SEO/AEO 핵심 요약)
+| 비교 항목 | 확인 질문 | 좋은 선택 신호 |
+|---|---|---|
+| 용도 적합성 | 집에서 먹을지, 선물용인지? | 목적에 맞는 구성/포장 형태 |
+| 품질 체감 | 식감과 당도가 내 취향에 맞는지? | 후기에서 식감/당도 평가가 구체적 |
+| 구성 가치 | 가격 대비 구성품이 합리적인지? | 단품 대비 세트 구성의 이점 명확 |
+| 보관 편의 | 보관이 쉬운지? | 개별 포장/보관 안내가 명확 |
+| 신뢰도 | 정보가 충분히 공개되어 있는지? | 원산지/구성/배송 정보가 투명 |
+
+## ${inputs.productName}를 추천하는 이유
+첫째, 구매 의사결정에 필요한 핵심 정보를 빠르게 파악할 수 있습니다. 둘째, 제품의 장단점을 사용 맥락과 함께 보게 되어 후회 가능성이 낮아집니다. 셋째, 선물용으로 고려할 때도 포장/구성/전달 상황까지 미리 점검할 수 있어 만족도가 높아집니다.
+
+## 이런 분께 특히 맞습니다
+- ${defaultPersona(inputs).targetAudience}
+- ${defaultPersona(inputs).painPoint} 문제를 겪는 분
+- ${defaultPersona(inputs).solutionBenefit}이 필요한 분
+
+## 실전 활용 팁
+1. 검색 시 메인 키워드 + 서브 키워드를 함께 조합해 비교군을 3개로 좁히세요.
+2. 후기에서는 "좋아요"보다 식감/포장/배송/보관 같은 구체 표현을 우선 확인하세요.
+3. 선물용이라면 전달 시점과 보관 기간을 먼저 확인한 뒤 구성 옵션을 선택하세요.
+
+## FAQ
+### Q1. ${inputs.mainKeyword || inputs.productName}는 가격만 보면 되나요?
+아닙니다. 가격만 보면 실제 만족도와 재구매율이 낮아질 수 있어, 구성/식감/보관/배송 안정성을 함께 봐야 합니다.
+
+### Q2. 처음 고를 때 가장 중요한 1가지는 무엇인가요?
+"내 사용 목적"입니다. 집에서 꾸준히 먹는 용도와 선물용은 우선순위가 다르므로 목적부터 정하면 선택이 훨씬 쉬워집니다.
+
+${defaultPersona(inputs).callToAction}`,
     persona: defaultPersona(inputs),
     mode: inputs.generationMode,
     report: {
@@ -64,37 +104,31 @@ const buildSeoPrompt = (inputs: BlogInputs) => {
   const persona = defaultPersona(inputs);
 
   return [
-    "당신은 네이버 SEO + AEO(답변 엔진 최적화) 전문 에디터입니다.",
-    "네이버 C-Rank/D.I.A+와 AI 검색(Cue:/CLOVA X)에 동시에 최적화된 글을 작성하세요.",
+    `당신은 네이버 블로그 SEO 전문가입니다. "${inputs.productName}" 홍보글을 1,500자 이상의 매우 상세한 장문으로 작성하세요.`,
+    `반드시 제목은 "${inputs.mainKeyword || inputs.productName}"로 시작하고 본문에 상세 비교 표를 포함하세요.`,
+    "결과물은 반드시 아래 JSON 형식으로만 응답하고, 마크다운 기호(예: ```json)를 절대 포함하지 마세요.",
+    '형식: {"title": "제목", "body": "1500자 본문", "imagePrompts": [{"nanoPrompt": "English keywords"}], "report": {"analysisSummary":"...","personaAnalysis":"...","avgWordCount":1800}}',
+    "추가 AEO/네이버 최적화 조건:",
+    "- 제목 길이 20~30자, 메인 키워드 앞 15자 이내 배치",
+    "- 서론 첫 문단에서 두괄식으로 핵심 답변 제시",
+    "- H2/H3 소제목 구조, 불릿 리스트 2개 이상",
+    "- 비교 표 1개 이상, FAQ 2개 이상",
+    "- 과장/허위 표현 금지, 키워드 반복은 자연스럽게",
+    "- 네이버 C-Rank/D.I.A+ 관점에서 정보성/신뢰성/맥락성을 강화",
     `제품명: ${inputs.productName}`,
     `메인 키워드: ${inputs.mainKeyword || inputs.productName}`,
     `서브 키워드: ${inputs.subKeywords || "없음"}`,
-    `블로그 참고 URL: ${inputs.productLink || "없음"}`,
-    `쇼핑커넥트/참고 URL: ${inputs.referenceLink || "없음"}`,
-    "페르소나 조건(비어있을 경우 자동 추론값 사용):",
+    `참고할 블로그 URL: ${inputs.productLink || "없음"}`,
+    `참고할 쇼핑/레퍼런스 URL: ${inputs.referenceLink || "없음"}`,
+    "참고 URL 문서를 그대로 복사하지 말고, 핵심 사실/비교 관점만 재구성해 유사문서를 피하세요.",
+    "페르소나:",
     `- 타깃 독자: ${persona.targetAudience}`,
     `- 문제점: ${persona.painPoint}`,
     `- 해결 기대효과: ${persona.solutionBenefit}`,
     `- 문체/톤: ${persona.writingTone}`,
     `- 글 흐름: ${persona.contentFlow}`,
     `- CTA: ${persona.callToAction}`,
-    "제목 규칙:",
-    "1) 한글 20~30자",
-    "2) 메인 키워드를 제목 앞 15자 이내 배치",
-    "3) 문장형/질문형 어조로 클릭 유도",
-    "4) 특수문자 남발 금지",
-    "본문 규칙:",
-    "1) 1,500~2,500자",
-    "2) 서론 첫 단락에서 두괄식으로 핵심 답변 제시",
-    "3) H2/H3 소제목 구조",
-    "4) 불릿 리스트 2개 이상",
-    "5) 비교 표(Table) 1개 이상",
-    "6) FAQ 2개 이상",
-    "7) 키워드 반복은 문맥 내 자연스럽게(과밀 반복 금지)",
-    "8) 이미지 맥락 활용 팁과 동영상 권장 문장을 자연스럽게 포함",
-    "결과는 JSON만 출력하세요.",
-    `imagePrompts는 ${requiredImageCount}개 이상 제공하세요(영문).`,
-    '{"title":"...","content":"...","imagePrompts":[{"nanoPrompt":"..."}],"report":{"analysisSummary":"...","personaAnalysis":"...","avgWordCount":1800}}'
+    `imagePrompts는 ${requiredImageCount}개 이상 제공하세요(영문).`
   ].join("\n");
 };
 
@@ -108,8 +142,8 @@ const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs = 3
   }
 };
 
-const callGeminiGenerateContent = async (model: string, body: any) => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
+const callGeminiGenerateContent = async (model: string, body: any, apiVersion: "v1beta" | "v1" = "v1beta") => {
+  const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${model}:generateContent?key=${GEMINI_KEY}`;
   return fetchWithTimeout(
     url,
     {
@@ -145,13 +179,7 @@ const extractModelslabImageUrl = (payload: any): string => {
   return payload.output?.[0] || payload.proxy_links?.[0] || payload.future_links?.[0] || "";
 };
 
-const normalizeInitImage = (imageURL: string, sourceDataUrl?: string) => {
-  const target = sourceDataUrl || imageURL;
-  if (!target) return "";
-  if (!target.startsWith("data:")) return target;
-  const [, base64] = target.split(",");
-  return base64 || target;
-};
+const normalizeInitImage = (imageURL: string, sourceDataUrl?: string) => imageURL || sourceDataUrl || "";
 
 
 const resolveModelslabResult = async (initialPayload: any): Promise<any> => {
@@ -200,33 +228,42 @@ const resolveModelslabResult = async (initialPayload: any): Promise<any> => {
 
 const tryGenerateText = async (prompt: string) => {
   let lastErrorMessage = "";
+  let seenRateLimit = false;
 
   for (const model of TEXT_MODELS) {
-    try {
-      const response = await callGeminiGenerateContent(model, {
-        contents: [{ parts: [{ text: prompt }] }]
-      });
+    for (const version of ["v1beta", "v1"] as const) {
+      try {
+        const response = await callGeminiGenerateContent(model, {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        }, version);
 
-      const payload = await response.json();
-      if (payload?.error) {
-        const code = Number(payload.error.code);
-        const message = String(payload.error.message || "");
-        lastErrorMessage = message;
+        const payload = await response.json();
+        if (payload?.error) {
+          const code = Number(payload.error.code);
+          const message = String(payload.error.message || "");
+          lastErrorMessage = message;
 
-        if (code === 429) return { status: "rate_limited" as const };
-        if (code === 404 || /not found|not supported|unsupported/i.test(message)) continue;
-        if (code >= 400) continue;
+          if (code === 429) {
+            seenRateLimit = true;
+            continue;
+          }
+          if (code === 404 || /not found|not supported|unsupported/i.test(message)) continue;
+          if (code >= 400) continue;
+        }
+
+        const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        if (rawText) return { status: "ok" as const, rawText };
+      } catch (error: any) {
+        lastErrorMessage = String(error?.message || lastErrorMessage || "텍스트 생성 실패");
+        continue;
       }
-
-      const rawText = payload?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      if (rawText) return { status: "ok" as const, rawText };
-    } catch (error: any) {
-      lastErrorMessage = String(error?.message || lastErrorMessage || "텍스트 생성 실패");
-      continue;
     }
   }
 
-  return { status: "no_model" as const, message: lastErrorMessage || "사용 가능한 텍스트 모델을 찾지 못했습니다." };
+  return seenRateLimit
+    ? { status: "rate_limited" as const }
+    : { status: "no_model" as const, message: lastErrorMessage || "사용 가능한 텍스트 모델을 찾지 못했습니다." };
 };
 
 const buildNanobananaPrompt = (
@@ -280,11 +317,9 @@ export const generateInpaintedImage = async (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         key: MODELSLAB_KEY,
-        model_id: import.meta.env.VITE_MODELSLAB_IMAGE_MODEL || "nanobanana",
         prompt: composedPrompt,
         negative_prompt: "deformed object, warped shape, distorted logo, wrong product, unrelated subject, mask artifact, collage, black frame",
         init_image: initImage,
-        mask_image: initImage,
         width: 1024,
         height: 1024,
         samples: 1,
@@ -363,6 +398,8 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
       return { dataUrl, uploadedUrl };
     })
   );
+
+  sourceAssets.sort(() => Math.random() - 0.5);
 
   const finalImages: ImageResult[] = [];
 
