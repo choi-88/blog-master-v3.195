@@ -48,6 +48,15 @@ const buildKeyUsageMarker = (provider: string, model: string, modelslabApiKey: s
   return `[provider=${provider} model=${model} key=${keyInfo}]`;
 };
 
+const getRandomImageIndexOrder = (length: number): number[] => {
+  const arr = Array.from({ length }, (_, i) => i);
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+};
+
 const DEFAULT_PERSONA = {
   targetAudience: "",
   painPoint: "",
@@ -257,6 +266,8 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
       mainKeyword: inputs.mainKeyword,
       generationMode: inputs.generationMode,
       subKeywords: inputs.subKeywords,
+      productLink: inputs.productLink,
+      referenceLink: inputs.referenceLink,
       geminiApiKey: settings.geminiApiKey
     })
   });
@@ -278,7 +289,7 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
     throw new Error(`콘텐츠 API 응답 형식 오류(${CLIENT_BUILD_MARKER})`);
   }
 
-  return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string; description?: string }> };
+  return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string; description?: string }>; seoAeo?: { score: number; total: number; checks: Record<string, boolean> } };
 };
 
 const analyzeObjectFromImage = async (
@@ -487,7 +498,7 @@ export const generateInpaintedImage = async (
 
   try {
     const imageSource = await resolveModelslabImageSource(image);
-    const objectProfile = await analyzeObjectFromImage(image, geminiApiKey, mainKeyword, "");
+    const objectProfile = await analyzeObjectFromImage(image, geminiApiKey, mainKeyword, imageRequest.description || "");
     const iPhoneStyle = "Shot naturally with iPhone 14 Pro camera look, realistic exposure and colors";
     const composedPrompt = [
       "Photorealistic background-only replacement for a product photo",
@@ -526,7 +537,9 @@ export const generateInpaintedImage = async (
         num_inference_steps: 40,
         guidance_scale: 4.5,
         strength: 0.12,
-        safety_checker: "no"
+        safety_checker: "no",
+        seed: Math.floor(Math.random() * 1000000000),
+        prompt_model: imageModel
       });
       generatedRaw = extractModelslabImageValue(result);
     }
@@ -563,10 +576,11 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
         nanoPrompt: `${req.nanoPrompt || ""}, dish_count:${idx < inputs.dishImageCount ? "with dish" : "without dish"}, selected_dish:${inputs.backgroundDish}, material:${inputs.backgroundMaterial}, color:${inputs.backgroundColor}, location:${inputs.backgroundLocation}`
       }));
 
+    const randomOrder = getRandomImageIndexOrder(inputs.productImages.length);
     const generatedImages = await Promise.all(
       imageRequests.map((imageRequest, index) =>
         generateInpaintedImage(
-          inputs.productImages[index % inputs.productImages.length],
+          inputs.productImages[randomOrder[index % randomOrder.length]],
           inputs.backgroundLocation,
           inputs.backgroundColor,
           inputs.backgroundMaterial,
@@ -599,7 +613,9 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
       analysisSummary: "SEO 최적화 초안 생성 완료",
       requiredImageCount: inputs.targetImageCount,
       personaAnalysis: inputs.persona.targetAudience || "일반 소비자",
-      avgWordCount: 1500
+      avgWordCount: 1500,
+      seoAeoScore: blogData.seoAeo ? `${blogData.seoAeo.score}/${blogData.seoAeo.total}` : undefined,
+      seoAeoChecklist: blogData.seoAeo?.checks
     },
     images: finalImages,
     groundingSources: []

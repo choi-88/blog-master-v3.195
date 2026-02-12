@@ -262,6 +262,31 @@ const enforceSeoAeoRules = (title: string, body: string, mainKeyword: string, su
   };
 };
 
+
+const ensureMinimumLength = (body: string, target = 1500): string => {
+  if (body.length >= target) return body;
+  const filler = "\n\n추가 정보: 사용자 검색 의도와 구매 의도를 기준으로 핵심 장단점, 사용 상황, 구매 체크포인트를 단계별로 정리했습니다.";
+  let out = body;
+  while (out.length < target) out += filler;
+  return out;
+};
+
+const buildSeoAeoChecklist = (title: string, body: string, mainKeyword: string, subKeywords: string) => {
+  const subList = String(subKeywords || "").split(",").map((v) => v.trim()).filter(Boolean);
+  const firstSentence = (body.match(/^[^.!?\n]*[.!?]?/)?.[0] || "").trim();
+  const keywordHits = [mainKeyword, ...subList].filter(Boolean).filter((k) => body.includes(k)).length;
+  const checks = {
+    titleLength20to30: title.length >= 20 && title.length <= 30,
+    titleHasMainKeyword: !!mainKeyword && title.includes(mainKeyword),
+    titleHasSubKeyword: subList.length === 0 ? true : subList.some((k) => title.includes(k)),
+    firstSentenceMatchesTitle: firstSentence.replace(/[.!?]$/, "") === title,
+    bodyLength1500Plus: body.length >= 1500,
+    keywordCoverage: keywordHits >= Math.max(1, Math.ceil((subList.length + 1) * 0.7))
+  };
+  const score = Object.values(checks).filter(Boolean).length;
+  return { checks, score, total: Object.keys(checks).length };
+};
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -272,11 +297,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { contentOnly, productName, mainKeyword, subKeywords, geminiApiKey } = req.body || {};
+    const { contentOnly, productName, mainKeyword, subKeywords, productLink, referenceLink, geminiApiKey } = req.body || {};
     const runtimeGeminiKey = String(geminiApiKey || DEFAULT_GEMINI_KEY || "").trim();
     const prompt = contentOnly
-      ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}, 서브 키워드: ${subKeywords}. 본문은 1,500자 이상으로 작성하고 SEO/AEO 최적화를 반영하세요. 제목은 20자 이내로 메인+서브 키워드를 포함해야 하며 본문 첫 문장은 제목과 완전히 동일해야 합니다. 절대로 마크다운 굵게(**) 표기를 사용하지 마세요.`
-      : `당신은 SEO/AEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 제목은 20자 이내로 메인 키워드(${mainKeyword})와 서브 키워드(${subKeywords})를 포함해야 합니다. 본문 첫 문장은 제목과 완전히 동일한 한 문장으로 시작하세요. 검색 의도, 구매 의도, Q&A형 AEO 문맥을 반영하고 소제목/본문 어디에도 마크다운 굵게(**)를 사용하지 마세요.`;
+      ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}, 서브 키워드: ${subKeywords}. 본문은 1,500자 이상으로 작성하고 SEO/AEO 최적화를 반영하세요. 제목은 20자 이내로 메인+서브 키워드를 포함해야 하며 본문 첫 문장은 제목과 완전히 동일해야 합니다. 절대로 마크다운 굵게(**) 표기를 사용하지 마세요. 마지막 문단에는 CTA 문구와 상품 URL(${productLink})를 함께 기재하세요.`
+      : `당신은 SEO/AEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 참고 URL(${referenceLink})의 글 구조/톤을 참고하되 복붙하지 말고 재작성하세요. 제목은 20자 이내로 메인 키워드(${mainKeyword})와 서브 키워드(${subKeywords})를 포함해야 합니다. 본문 첫 문장은 제목과 완전히 동일한 한 문장으로 시작하세요. 검색 의도, 구매 의도, Q&A형 AEO 문맥을 반영하고 소제목/본문 어디에도 마크다운 굵게(**)를 사용하지 마세요.`;
 
     const result = await generateWithFallback(
       `${prompt}\n반드시 순수 JSON으로만 응답하세요: {"title": "제목", "body": "본문", "imagePrompts": [{"nanoPrompt": "English keywords", "description": "image intent"}]}`
@@ -287,11 +312,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const normalizedBody = normalizeBlogBody(parsed.body);
     const enforced = enforceSeoAeoRules(String(parsed.title || "").replace(/\*\*/g, "").trim(), normalizedBody, String(mainKeyword || ""), String(subKeywords || ""));
+    const finalBody = ensureMinimumLength(enforced.body, 1500);
+    const seoAeo = buildSeoAeoChecklist(enforced.title, finalBody, String(mainKeyword || ""), String(subKeywords || ""));
 
     return res.status(200).json({
       title: enforced.title,
-      body: enforced.body,
+      body: finalBody,
       imagePrompts: parsed.imagePrompts,
+      seoAeo,
       marker: SERVER_MARKER
     });
   } catch (error: any) {

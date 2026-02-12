@@ -57,6 +57,8 @@ export interface DiagnosisReport {
   requiredImageCount: number;
   personaAnalysis: string;
   avgWordCount: number;
+  seoAeoScore?: string;
+  seoAeoChecklist?: Record<string, boolean>;
 }
 
 export interface BlogPost {

@@ -1007,6 +1007,18 @@ const App: React.FC = () => {
                           <p className="text-sm font-bold text-indigo-50 bg-white/10 p-5 rounded-3xl border border-white/10 shadow-inner">
                             {result.report.analysisSummary}
                           </p>
+                          {result.report.seoAeoScore && (
+                            <div className="text-xs font-black bg-white/15 rounded-2xl p-4 border border-white/20">SEO/AEO 점수: {result.report.seoAeoScore}</div>
+                          )}
+                          {result.report.seoAeoChecklist && (
+                            <div className="grid grid-cols-1 gap-2 text-[11px]">
+                              {Object.entries(result.report.seoAeoChecklist).map(([k, v]) => (
+                                <div key={k} className="flex items-center justify-between bg-white/10 rounded-xl px-3 py-2">
+                                  <span className="font-bold">{k}</span><span>{v ? "✅" : "❌"}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                        </div>
                     </section>
 
