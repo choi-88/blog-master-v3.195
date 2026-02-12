@@ -61,29 +61,40 @@ const parseBlogJson = (rawText: string) => {
 
 const buildSeoPrompt = (inputs: BlogInputs) => {
   const requiredImageCount = Math.max(1, inputs.targetImageCount || 1);
+  const persona = defaultPersona(inputs);
+
   return [
-    "당신은 네이버/구글 SEO + AEO 최적화 블로그 전문 카피라이터입니다.",
+    "당신은 네이버 SEO + AEO(답변 엔진 최적화) 전문 에디터입니다.",
+    "네이버 C-Rank/D.I.A+와 AI 검색(Cue:/CLOVA X)에 동시에 최적화된 글을 작성하세요.",
     `제품명: ${inputs.productName}`,
     `메인 키워드: ${inputs.mainKeyword || inputs.productName}`,
     `서브 키워드: ${inputs.subKeywords || "없음"}`,
-    `제품 링크: ${inputs.productLink || "없음"}`,
-    `참고 링크: ${inputs.referenceLink || "없음"}`,
-    "아래 페르소나와 사용자 조건을 반드시 반영하세요.",
-    `- 타깃 독자: ${inputs.persona.targetAudience}`,
-    `- 핵심 문제: ${inputs.persona.painPoint}`,
-    `- 기대 효익: ${inputs.persona.solutionBenefit}`,
-    `- 문체/톤: ${inputs.persona.writingTone}`,
-    `- 글 흐름: ${inputs.persona.contentFlow}`,
-    `- CTA: ${inputs.persona.callToAction}`,
-    "출력 조건:",
-    "1) 한국어 본문 1,500자 이상",
-    "2) 제목은 메인 키워드로 시작",
-    "3) H2/H3 구조, 불릿, 비교 표 1개 이상 포함",
-    "4) 네이버/구글 검색 의도 대응 문장과 FAQ 2개 이상 포함",
-    "5) 과장/허위 표현 금지",
-    `6) 이미지 프롬프트는 ${requiredImageCount}개 이상 제공(영문)` ,
-    "반드시 JSON으로만 답하세요.",
-    '{"title":"...","content":"...","imagePrompts":[{"nanoPrompt":"..."}],"report":{"analysisSummary":"...","personaAnalysis":"...","avgWordCount":1500}}'
+    `블로그 참고 URL: ${inputs.productLink || "없음"}`,
+    `쇼핑커넥트/참고 URL: ${inputs.referenceLink || "없음"}`,
+    "페르소나 조건(비어있을 경우 자동 추론값 사용):",
+    `- 타깃 독자: ${persona.targetAudience}`,
+    `- 문제점: ${persona.painPoint}`,
+    `- 해결 기대효과: ${persona.solutionBenefit}`,
+    `- 문체/톤: ${persona.writingTone}`,
+    `- 글 흐름: ${persona.contentFlow}`,
+    `- CTA: ${persona.callToAction}`,
+    "제목 규칙:",
+    "1) 한글 20~30자",
+    "2) 메인 키워드를 제목 앞 15자 이내 배치",
+    "3) 문장형/질문형 어조로 클릭 유도",
+    "4) 특수문자 남발 금지",
+    "본문 규칙:",
+    "1) 1,500~2,500자",
+    "2) 서론 첫 단락에서 두괄식으로 핵심 답변 제시",
+    "3) H2/H3 소제목 구조",
+    "4) 불릿 리스트 2개 이상",
+    "5) 비교 표(Table) 1개 이상",
+    "6) FAQ 2개 이상",
+    "7) 키워드 반복은 문맥 내 자연스럽게(과밀 반복 금지)",
+    "8) 이미지 맥락 활용 팁과 동영상 권장 문장을 자연스럽게 포함",
+    "결과는 JSON만 출력하세요.",
+    `imagePrompts는 ${requiredImageCount}개 이상 제공하세요(영문).`,
+    '{"title":"...","content":"...","imagePrompts":[{"nanoPrompt":"..."}],"report":{"analysisSummary":"...","personaAnalysis":"...","avgWordCount":1800}}'
   ].join("\n");
 };
 
@@ -134,26 +145,54 @@ const extractModelslabImageUrl = (payload: any): string => {
   return payload.output?.[0] || payload.proxy_links?.[0] || payload.future_links?.[0] || "";
 };
 
+const normalizeInitImage = (imageURL: string, sourceDataUrl?: string) => {
+  const target = sourceDataUrl || imageURL;
+  if (!target) return "";
+  if (!target.startsWith("data:")) return target;
+  const [, base64] = target.split(",");
+  return base64 || target;
+};
+
+
 const resolveModelslabResult = async (initialPayload: any): Promise<any> => {
   let payload = initialPayload;
   let imageUrl = extractModelslabImageUrl(payload);
-  if (imageUrl) return payload;
+  if (imageUrl || !MODELSLAB_KEY) return payload;
 
   const fetchResultUrl = payload?.fetch_result;
-  if (!fetchResultUrl || !MODELSLAB_KEY) return payload;
 
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    const pollRes = await fetch(fetchResultUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: MODELSLAB_KEY })
-    });
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1300));
 
-    payload = await pollRes.json();
+    if (fetchResultUrl) {
+      try {
+        const postRes = await fetch(fetchResultUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: MODELSLAB_KEY })
+        });
+        payload = await postRes.json();
+      } catch {
+        try {
+          const getRes = await fetch(fetchResultUrl, { method: "GET" });
+          payload = await getRes.json();
+        } catch {
+          // ignore and continue
+        }
+      }
+    } else if (payload?.id) {
+      try {
+        const fallbackRes = await fetch(`https://modelslab.com/api/v6/images/fetch?key=${MODELSLAB_KEY}&id=${payload.id}`);
+        payload = await fallbackRes.json();
+      } catch {
+        // ignore and continue
+      }
+    }
+
     imageUrl = extractModelslabImageUrl(payload);
     if (imageUrl) return payload;
-    if (String(payload?.status || "").toLowerCase() === "error") return payload;
+    const status = String(payload?.status || "").toLowerCase();
+    if (status === "error" || status === "failed") return payload;
   }
 
   return payload;
@@ -224,7 +263,7 @@ export const generateInpaintedImage = async (
   inputs: BlogInputs,
   index: number,
   nanoPrompt: string,
-  options?: { isDishImage?: boolean; objectHint?: string }
+  options?: { isDishImage?: boolean; objectHint?: string; sourceDataUrl?: string }
 ): Promise<ImageResult> => {
   if (!MODELSLAB_KEY) {
     return { url: imageURL, filename: `ai_${index}.png`, description: "원본 유지(모델슬랩 키 없음)", nanoPrompt: nanoPrompt || "" };
@@ -233,6 +272,7 @@ export const generateInpaintedImage = async (
   const objectHint = options?.objectHint || inputs.mainKeyword || inputs.productName;
   const isDishImage = Boolean(options?.isDishImage);
   const composedPrompt = buildNanobananaPrompt(inputs, nanoPrompt, { isDishImage, objectHint });
+  const initImage = normalizeInitImage(imageURL, options?.sourceDataUrl);
 
   try {
     const res = await fetch("https://modelslab.com/api/v6/image_editing/inpaint", {
@@ -240,9 +280,11 @@ export const generateInpaintedImage = async (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         key: MODELSLAB_KEY,
+        model_id: import.meta.env.VITE_MODELSLAB_IMAGE_MODEL || "nanobanana",
         prompt: composedPrompt,
         negative_prompt: "deformed object, warped shape, distorted logo, wrong product, unrelated subject, mask artifact, collage, black frame",
-        init_image: imageURL,
+        init_image: initImage,
+        mask_image: initImage,
         width: 1024,
         height: 1024,
         samples: 1,
@@ -313,22 +355,28 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
     }
   }
 
-  const sourceImages = (inputs.productImages || []).slice(0, 20);
-  const sourceUrls = await Promise.all(
-    sourceImages.filter((image) => Boolean(image?.data)).map((image) => uploadImageToBlob(image))
+  const sourceImages = (inputs.productImages || []).slice(0, 20).filter((image) => Boolean(image?.data));
+  const sourceAssets = await Promise.all(
+    sourceImages.map(async (image) => {
+      const dataUrl = toDataUrl(image.mimeType, image.data);
+      const uploadedUrl = await uploadImageToBlob(image);
+      return { dataUrl, uploadedUrl };
+    })
   );
 
   const finalImages: ImageResult[] = [];
 
-  if (sourceUrls.length > 0) {
+  if (sourceAssets.length > 0) {
     for (let slot = 0; slot < requiredImageCount; slot += 1) {
-      const sourceUrl = sourceUrls[slot % sourceUrls.length];
+      const sourceAsset = sourceAssets[slot % sourceAssets.length];
+      const sourceUrl = sourceAsset.uploadedUrl;
       const promptCandidate = blogData.imagePrompts?.[slot]?.nanoPrompt || blogData.imagePrompts?.[0]?.nanoPrompt || `${inputs.productName}, realistic product photo`;
       const isDishImage = slot < dishImageCount;
 
       const imgRes = await generateInpaintedImage(sourceUrl, inputs, slot, promptCandidate, {
         isDishImage,
-        objectHint: inputs.mainKeyword || inputs.productName
+        objectHint: inputs.mainKeyword || inputs.productName,
+        sourceDataUrl: sourceAsset.dataUrl
       });
 
       finalImages.push({
