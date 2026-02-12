@@ -20,18 +20,32 @@ const resolveApiSettings = (inputs: BlogInputs) => ({
   imageModel: inputs.imageModel || DEFAULT_IMAGE_MODEL
 });
 
+type ObjectProfile = {
+  objectName: string;
+  objectDetails: string;
+  framingHint: string;
+};
+
 const mapImageModelToModelslabId = (model: string): string => {
   const key = model.toLowerCase();
-  if (key.includes("nanobanana") || key.includes("nano-banana")) return "flux-kontext-dev";
+  if (key.includes("nano-banana-pro") || key.includes("nanobanana-pro")) return "nano-banana-pro";
+  if (key.includes("nano-banana") || key.includes("nanobanana")) return "nano-banana";
   if (key.includes("imagen3") || key.includes("imagine3")) return "google-imagen-3";
-  return "flux-kontext-dev";
+  return model;
 };
 
 const mapImageModelToReplicateModel = (model: string): string => {
   const key = model.toLowerCase();
-  if (key.includes("pro")) return "black-forest-labs/flux-kontext-pro";
+  if (key.includes("nano-banana-pro") || key.includes("nanobanana-pro")) return "black-forest-labs/flux-kontext-pro";
+  if (key.includes("nano-banana") || key.includes("nanobanana")) return "black-forest-labs/flux-kontext-dev";
   if (key.includes("imagen3") || key.includes("imagine3")) return "google/imagen-3";
-  return "black-forest-labs/flux-kontext-dev";
+  return model;
+};
+
+const buildKeyUsageMarker = (provider: string, model: string, modelslabApiKey: string, replicateApiKey: string): string => {
+  const masked = (value: string) => (value ? `${value.slice(0, 4)}...${value.slice(-4)}` : "none");
+  const keyInfo = provider === "REPLICATE" ? masked(replicateApiKey) : masked(modelslabApiKey);
+  return `[provider=${provider} model=${model} key=${keyInfo}]`;
 };
 
 const DEFAULT_PERSONA = {
@@ -267,6 +281,79 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
   return result as { title: string; body: string; imagePrompts?: Array<{ nanoPrompt?: string; description?: string }> };
 };
 
+const analyzeObjectFromImage = async (
+  image: ProductImageData,
+  geminiApiKey: string,
+  mainKeyword: string,
+  subKeywords: string
+): Promise<ObjectProfile> => {
+  if (!geminiApiKey) {
+    return {
+      objectName: "product",
+      objectDetails: `${mainKeyword} ${subKeywords}`.trim(),
+      framingHint: "close-up, centered composition"
+    };
+  }
+
+  const prompt = [
+    "Analyze the uploaded product photo for background replacement.",
+    "Return strict JSON only:",
+    '{"objectName":"", "objectDetails":"", "framingHint":""}',
+    "objectDetails should describe the visible product appearance and packaging only.",
+    "framingHint should describe camera angle and composition in one line."
+  ].join("\n");
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: image.mimeType,
+                    data: image.data
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      }
+    );
+
+    const json = await res.json();
+    const text = String(json?.candidates?.[0]?.content?.parts?.[0]?.text || "");
+    const cleaned = text.replace(/```json|```/gi, "").trim();
+    const parsed = safeJsonParse<any>(cleaned);
+    return {
+      objectName: String(parsed?.objectName || "product"),
+      objectDetails: String(parsed?.objectDetails || `${mainKeyword} ${subKeywords}`.trim()),
+      framingHint: String(parsed?.framingHint || "close-up, centered composition")
+    };
+  } catch {
+    return {
+      objectName: "product",
+      objectDetails: `${mainKeyword} ${subKeywords}`.trim(),
+      framingHint: "close-up, centered composition"
+    };
+  }
+};
+
+const requestModelslabFetchResult = async (apiKey: string, requestId: string): Promise<any> => {
+  const res = await fetch("https://modelslab.com/api/v6/images/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key: apiKey, request_id: requestId })
+  });
+  return await res.json();
+};
+
 const requestModelslabInpaint = async (
   imageSource: ModelslabImageSource,
   payloadBase: Record<string, any>
@@ -290,7 +377,29 @@ const requestModelslabInpaint = async (
 
     const result = await res.json();
     if (!result?.error) {
-      return result;
+      if (result?.output?.length || result?.proxy_links?.length || result?.images?.length || result?.image) {
+        return result;
+      }
+
+      const requestId = String(result?.id || result?.request_id || "");
+      if (requestId && String(payloadBase?.key || "")) {
+        for (let i = 0; i < 30; i += 1) {
+          await new Promise((r) => setTimeout(r, 1200));
+          const fetched = await requestModelslabFetchResult(String(payloadBase.key), requestId);
+          if (fetched?.output?.length || fetched?.proxy_links?.length || fetched?.images?.length || fetched?.image) {
+            return fetched;
+          }
+          if (String(fetched?.status || "").toLowerCase() === "failed") {
+            throw new Error(String(fetched?.error || fetched?.message || "ModelsLab fetch failed"));
+          }
+        }
+      }
+
+      if (result?.future_links?.length) {
+        return { output: [result.future_links[0]] };
+      }
+
+      throw new Error(String(result?.message || "ModelsLab 출력 이미지를 찾지 못했습니다."));
     }
 
     lastError = String(result.error || result.message || `HTTP ${res.status}`);
@@ -317,7 +426,7 @@ const requestReplicateImageEdit = async (
       Authorization: `Token ${replicateApiKey}`
     },
     body: JSON.stringify({
-      version: model,
+      model,
       input: {
         prompt,
         image: toDataUrl(imageData),
@@ -366,7 +475,8 @@ export const generateInpaintedImage = async (
   imageProvider: string = DEFAULT_IMAGE_PROVIDER,
   imageModel: string = DEFAULT_IMAGE_MODEL,
   modelslabApiKey: string = DEFAULT_MODELSLAB_KEY || "",
-  replicateApiKey: string = ""
+  replicateApiKey: string = "",
+  geminiApiKey: string = ""
 ): Promise<ImageResult> => {
   if (imageProvider === "MODELSLAB" && !modelslabApiKey) {
     throw new Error("ModelsLab API 키가 설정되지 않았습니다.");
@@ -377,11 +487,17 @@ export const generateInpaintedImage = async (
 
   try {
     const imageSource = await resolveModelslabImageSource(image);
+    const objectProfile = await analyzeObjectFromImage(image, geminiApiKey, mainKeyword, "");
+    const iPhoneStyle = "Shot naturally with iPhone 14 Pro camera look, realistic exposure and colors";
     const composedPrompt = [
       "Photorealistic background-only replacement for a product photo",
       "Keep the uploaded product object pixel-faithful: do not alter shape, logo, label text, color, texture, or geometry.",
       "Do not redraw or repaint the object; edit only surrounding background area and keep object pixels unchanged.",
       "Allow only natural global lighting effects on the object: saturation, brightness, soft reflection, and light direction adaptation.",
+      `Primary object: ${objectProfile.objectName}`,
+      `Object details: ${objectProfile.objectDetails}`,
+      `Framing hint: ${objectProfile.framingHint}`,
+      iPhoneStyle,
       `Main keyword: ${mainKeyword}`,
       `Scene: ${backgroundLocation}`,
       `Color mood: ${backgroundColor}`,
@@ -423,7 +539,7 @@ export const generateInpaintedImage = async (
     return {
       url: generatedUrl,
       filename: `ai_${index + 1}.png`,
-      description: imageRequest.description || "AI 합성 이미지",
+      description: `${imageRequest.description || "AI 합성 이미지"} ${buildKeyUsageMarker(imageProvider, imageModel, modelslabApiKey, replicateApiKey)}`,
       nanoPrompt: imageRequest.nanoPrompt || ""
     };
   } catch (error: any) {
@@ -462,7 +578,8 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
           settings.imageProvider,
           settings.imageModel,
           settings.modelslabApiKey,
-          settings.replicateApiKey
+          settings.replicateApiKey,
+          settings.geminiApiKey
         )
       )
     );

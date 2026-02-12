@@ -413,7 +413,12 @@ const App: React.FC = () => {
         imgReq,
         index,
         inputs.mainKeyword || inputs.productName,
-        result.report.personaAnalysis || "Amateur iPhone look"
+        result.report.personaAnalysis || "Amateur iPhone look",
+        inputs.imageProvider || 'MODELSLAB',
+        inputs.imageModel || 'nano-banana-pro',
+        inputs.modelslabApiKey || '',
+        inputs.replicateApiKey || '',
+        inputs.geminiApiKey || ''
       );
 
       if (newImg.url) {
