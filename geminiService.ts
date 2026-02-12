@@ -580,21 +580,33 @@ const requestReplicateImageEdit = async (
 
 
 
+const roundDownToMultipleOf8 = (value: number, minimum = 8): number => {
+  const rounded = Math.floor(value / 8) * 8;
+  return Math.max(minimum, rounded);
+};
+
 const getOutputDimensionsFromSource = async (image: ProductImageData): Promise<{ width: number; height: number }> => {
   const { width, height } = await getImageSize(image);
   const ratio = height / Math.max(1, width);
 
   let targetWidth = 1000;
-  let targetHeight = Math.max(1, Math.round(targetWidth * ratio));
+  let targetHeight = Math.max(8, Math.round(targetWidth * ratio));
 
   if (targetHeight > 1024) {
     targetHeight = 1024;
-    targetWidth = Math.max(1, Math.round(targetHeight / Math.max(ratio, 0.0001)));
+    targetWidth = Math.max(8, Math.round(targetHeight / Math.max(ratio, 0.0001)));
   }
 
   if (targetWidth > 1000) {
     targetWidth = 1000;
-    targetHeight = Math.max(1, Math.round(targetWidth * ratio));
+    targetHeight = Math.max(8, Math.round(targetWidth * ratio));
+  }
+
+  targetWidth = roundDownToMultipleOf8(targetWidth);
+  targetHeight = roundDownToMultipleOf8(targetHeight);
+
+  if (targetHeight > 1024) {
+    targetHeight = 1024;
   }
 
   return { width: targetWidth, height: targetHeight };
