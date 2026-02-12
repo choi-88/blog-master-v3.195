@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const DEFAULT_GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 const GEMINI_MODEL = process.env.GEMINI_MODEL || process.env.VITE_GEMINI_MODEL;
-const SERVER_MARKER = "server-fallback-v5";
+const SERVER_MARKER = "server-fallback-v6";
 
 const PREFERRED_GEMINI_MODELS = [
   GEMINI_MODEL,
@@ -210,9 +210,32 @@ const requestGeminiGenerateContent = async (url: string, promptText: string) => 
   return lastResult || { error: { message: "Gemini 응답 없음" } };
 };
 
+const RATE_LIMIT_PATTERN = /quota exceeded|rate limit|too many requests|resource exhausted|429/i;
+
+const extractRetryAfterMs = (message: string): number => {
+  const secMatch = message.match(/retry in\s*([0-9]+(?:\.[0-9]+)?)s/i);
+  if (secMatch) {
+    return Math.max(0, Math.ceil(Number(secMatch[1]) * 1000));
+  }
+
+  const msMatch = message.match(/retry in\s*(\d+)ms/i);
+  if (msMatch) {
+    return Math.max(0, Number(msMatch[1]));
+  }
+
+  return 0;
+};
+
+const sleep = async (ms: number) => {
+  if (ms <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
 const generateWithFallback = async (promptText: string, geminiKey: string) => {
   const attempts: string[] = [];
   let lastError = "";
+  let rateLimited = false;
+  let maxRetryAfterMs = 0;
 
   for (const { apiVersion, modelName } of await getModelPairs(geminiKey)) {
     const label = `${apiVersion}/${modelName}`;
@@ -227,15 +250,55 @@ const generateWithFallback = async (promptText: string, geminiKey: string) => {
 
       const apiError = String(result.error?.message || "HTTP error");
       lastError = `${label} -> ${apiError}`;
+
+      if (RATE_LIMIT_PATTERN.test(apiError)) {
+        rateLimited = true;
+        maxRetryAfterMs = Math.max(maxRetryAfterMs, extractRetryAfterMs(apiError));
+        continue;
+      }
+
       if (!/not found|not supported|unsupported|permission denied|404/i.test(apiError)) {
         throw new Error(lastError);
       }
     } catch (error: any) {
       lastError = `${label} -> ${error?.message || "unknown error"}`;
+
+      if (RATE_LIMIT_PATTERN.test(lastError)) {
+        rateLimited = true;
+        maxRetryAfterMs = Math.max(maxRetryAfterMs, extractRetryAfterMs(lastError));
+        continue;
+      }
+
       if (!/not found|not supported|unsupported|permission denied|404/i.test(lastError)) {
         throw new Error(lastError);
       }
     }
+  }
+
+  if (rateLimited) {
+    const waitMs = Math.max(0, maxRetryAfterMs || 16000);
+    await sleep(waitMs);
+
+    const retryPairs = await getModelPairs(geminiKey);
+    for (const { apiVersion, modelName } of retryPairs) {
+      const label = `${apiVersion}/${modelName}`;
+      const url = `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${geminiKey}`;
+      const result = await requestGeminiGenerateContent(url, promptText);
+      if (!result.error) {
+        return result;
+      }
+      const apiError = String(result.error?.message || "HTTP error");
+      lastError = `${label} -> ${apiError}`;
+      if (!RATE_LIMIT_PATTERN.test(apiError) && !/not found|not supported|unsupported|permission denied|404/i.test(apiError)) {
+        throw new Error(lastError);
+      }
+    }
+
+    const waitSec = Math.ceil(waitMs / 1000);
+    const error = new Error(`요청 한도를 초과했습니다. 약 ${waitSec}초 후 다시 시도해주세요. 마지막 오류: ${lastError}`) as Error & { code?: string; retryAfterMs?: number };
+    error.code = "RATE_LIMITED";
+    error.retryAfterMs = waitMs;
+    throw error;
   }
 
   throw new Error(`모델 탐색 실패(${SERVER_MARKER}): ${lastError}. tried=${attempts.join(",")}`);
@@ -335,8 +398,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       marker: SERVER_MARKER
     });
   } catch (error: any) {
-    return res.status(500).json({
-      error: `구글 API 에러(${SERVER_MARKER}): ${error?.message || "unknown error"}`
+    const statusCode = error?.code === "RATE_LIMITED" ? 429 : 500;
+    const retryAfterSec = Math.ceil(Number(error?.retryAfterMs || 0) / 1000);
+    return res.status(statusCode).json({
+      error: `구글 API 에러(${SERVER_MARKER}): ${error?.message || "unknown error"}`,
+      retryAfterSec: retryAfterSec > 0 ? retryAfterSec : undefined
     });
   }
 }
