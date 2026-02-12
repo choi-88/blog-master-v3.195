@@ -265,7 +265,7 @@ const App: React.FC = () => {
     if (!result) return;
     setIsContentRegenerating(true);
     try {
-      const data = await generateBlogSystem(inputs, true);
+      const data = await generateBlogSystem(inputs);
       setResult(prev => {
         if (!prev) return data;
         return {
@@ -283,20 +283,42 @@ const App: React.FC = () => {
     }
   };
 
+  const getOriginalImageDataUrl = (index: number) => {
+    const original = inputs.productImages[index % Math.max(inputs.productImages.length, 1)];
+    if (!original) return '';
+    return `data:${original.mimeType};base64,${original.data}`;
+  };
+
   const downloadAllAsZip = async () => {
     if (!result) return;
     const zip = new JSZip();
     if (result.mode === 'FULL') {
-      zip.file("blog_content.txt", `${result.title}\n\n${result.content}`);
+      zip.file("blog_content.txt", `${result.title}
+
+${result.content}`);
     }
     const imgFolder = zip.folder("images");
-    
-    result.images.forEach((img, idx) => {
-      if (img.url) {
+
+    await Promise.all(result.images.map(async (img, idx) => {
+      if (!img.url) return;
+      const fileName = img.filename || `image_${idx + 1}.png`;
+
+      if (img.url.startsWith('data:')) {
         const base64Data = img.url.split(',')[1];
-        imgFolder?.file(img.filename || `image_${idx + 1}.png`, base64Data, { base64: true });
+        if (base64Data) {
+          imgFolder?.file(fileName, base64Data, { base64: true });
+        }
+        return;
       }
-    });
+
+      try {
+        const response = await fetch(img.url);
+        const blob = await response.blob();
+        imgFolder?.file(fileName, blob);
+      } catch (error) {
+        console.error('이미지 다운로드 실패:', error);
+      }
+    }));
 
     const content = await zip.generateAsync({ type: "blob" });
     const link = document.createElement('a');
@@ -305,18 +327,36 @@ const App: React.FC = () => {
     link.click();
   };
 
-  const downloadSingleImage = (url: string, filename: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
+  const downloadSingleImage = async (url: string, filename: string) => {
+    if (!url) return;
+
+    try {
+      if (url.startsWith('data:')) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        return;
+      }
+
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error('단일 이미지 다운로드 실패:', error);
+    }
   };
 
   const regenerateSingleImage = async (index: number, customBg?: string) => {
     if (!result || isRegenerating !== null) return;
     
-    const originalImage = inputs.productImages[index % inputs.productImages.length];
-    if (!originalImage) return;
+    const originalImageDataUrl = getOriginalImageDataUrl(index);
+    if (!originalImageDataUrl) return;
 
     setIsRegenerating(index);
     try {
@@ -325,16 +365,16 @@ const App: React.FC = () => {
         description: customBg ? `${customBg} 배경으로 재생성된 이미지` : (result.images[index]?.description || "다시 생성된 이미지")
       };
       
+      const nextInputs = {
+        ...inputs,
+        backgroundLocation: customBg || inputs.backgroundLocation
+      };
+
       const newImg = await generateInpaintedImage(
-        originalImage,
-        customBg || inputs.backgroundLocation,
-        inputs.backgroundColor,
-        inputs.backgroundMaterial,
-        inputs.backgroundDish,
-        imgReq,
+        originalImageDataUrl,
+        nextInputs,
         index,
-        inputs.mainKeyword || inputs.productName,
-        result.report.personaAnalysis || "Amateur iPhone look"
+        imgReq.nanoPrompt
       );
 
       if (newImg.url) {
@@ -795,7 +835,7 @@ const App: React.FC = () => {
                         {result.images.map((img, idx) => (
                           <div key={idx} className="space-y-6 group">
                              <div className="relative aspect-[4/3] rounded-[2.5rem] overflow-hidden border shadow-2xl group-hover:shadow-indigo-100 group-hover:ring-4 group-hover:ring-indigo-50 transition-all">
-                                <img src={img.url} className="w-full h-full object-cover duration-700 group-hover:scale-105" alt={img.filename} />
+                                <img src={img.url || getOriginalImageDataUrl(idx)} onError={(e) => { e.currentTarget.src = getOriginalImageDataUrl(idx); }} className="w-full h-full object-cover duration-700 group-hover:scale-105" alt={img.filename} />
                                 {isRegenerating === idx && (
                                   <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-10">
                                     <div className="flex flex-col items-center gap-4 text-white">
