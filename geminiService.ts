@@ -415,8 +415,7 @@ const ensureRenderableImageUrl = async (rawValue: string): Promise<string> => {
   }
 
   if (/^https?:\/\//i.test(normalized)) {
-    const resolved = await resolvePossibleImageEndpoint(normalized);
-    return resolved || normalized;
+    return await resolvePossibleImageEndpoint(normalized);
   }
 
   return "";
@@ -608,6 +607,24 @@ const requestModelslabFetchResult = async (apiKey: string, requestId: string): P
   return await res.json();
 };
 
+const tryResolveRenderableFromModelslabResult = async (result: any): Promise<string> => {
+  const candidates = [
+    ...(Array.isArray(result?.output) ? result.output : []),
+    ...(Array.isArray(result?.proxy_links) ? result.proxy_links : []),
+    ...(Array.isArray(result?.future_links) ? result.future_links : []),
+    ...(Array.isArray(result?.images) ? result.images : []),
+    result?.image
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const raw = typeof candidate === "string" ? candidate : String(candidate?.url || candidate?.image || candidate?.data || candidate?.base64 || "");
+    const resolved = await ensureRenderableImageUrl(raw);
+    if (resolved) return resolved;
+  }
+
+  return "";
+};
+
 const requestModelslabInpaint = async (
   imageSource: ModelslabImageSource,
   payloadBase: Record<string, any>
@@ -631,8 +648,9 @@ const requestModelslabInpaint = async (
 
     const result = await res.json();
     if (!result?.error) {
-      if (result?.output?.length || result?.proxy_links?.length || result?.images?.length || result?.image) {
-        return result;
+      const directResolved = await tryResolveRenderableFromModelslabResult(result);
+      if (directResolved) {
+        return { output: [directResolved] };
       }
 
       const requestId = String(result?.id || result?.request_id || "");
@@ -640,8 +658,9 @@ const requestModelslabInpaint = async (
         for (let i = 0; i < 30; i += 1) {
           await new Promise((r) => setTimeout(r, 1200));
           const fetched = await requestModelslabFetchResult(String(payloadBase.key), requestId);
-          if (fetched?.output?.length || fetched?.proxy_links?.length || fetched?.images?.length || fetched?.image) {
-            return fetched;
+          const fetchedResolved = await tryResolveRenderableFromModelslabResult(fetched);
+          if (fetchedResolved) {
+            return { output: [fetchedResolved] };
           }
           if (String(fetched?.status || "").toLowerCase() === "failed") {
             throw new Error(String(fetched?.error || fetched?.message || "ModelsLab fetch failed"));
@@ -752,6 +771,16 @@ const getOutputDimensionsFromSource = async (image: ProductImageData): Promise<{
   return { width: targetWidth, height: targetHeight };
 };
 
+const sanitizeImageIntentPrompt = (text: string): string => {
+  if (!text) return "";
+  let out = text;
+  out = out.replace(/traditional persimmon drying racks[^,.]*[,.]?/gi, "");
+  out = out.replace(/autumn harvest season[^,.]*[,.]?/gi, "");
+  out = out.replace(/scenic countryside[^,.]*[,.]?/gi, "");
+  out = out.replace(/uploaded_subject:[^,]+/gi, "");
+  return out.replace(/\s{2,}/g, " ").trim();
+};
+
 const composeBackgroundInpaintPrompt = (params: {
   objectProfile: ObjectProfile;
   imageRequest: { nanoPrompt?: string; description?: string };
@@ -778,7 +807,7 @@ const composeBackgroundInpaintPrompt = (params: {
     `Color mood: ${backgroundColor}`,
     `Surface material: ${backgroundMaterial}`,
     `Dish styling: ${backgroundDish}`,
-    imageRequest.nanoPrompt || imageRequest.description || ''
+    sanitizeImageIntentPrompt(imageRequest.nanoPrompt || imageRequest.description || "")
   ]
     .filter(Boolean)
     .join('. ');
@@ -944,7 +973,7 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
     const imageRequests = buildImageRequests(blogData.imagePrompts, targetImageCount, inputs.mainKeyword || inputs.productName)
       .map((req, idx) => ({
         ...req,
-        nanoPrompt: `${req.nanoPrompt || ""}, uploaded_subject:${inputs.productName || inputs.mainKeyword}, dish_image_mode:${idx < inputs.dishImageCount ? "with_dish" : "without_dish"}, dish_style:${inputs.backgroundDish}, table_or_floor_material:${inputs.backgroundMaterial}, global_saturation_mood:${inputs.backgroundColor}, full_scene_location:${inputs.backgroundLocation}`
+        nanoPrompt: `${req.nanoPrompt || ""}, dish_image_mode:${idx < inputs.dishImageCount ? "with_dish" : "without_dish"}, dish_style:${inputs.backgroundDish}, table_or_floor_material:${inputs.backgroundMaterial}, global_saturation_mood:${inputs.backgroundColor}, full_scene_location:${inputs.backgroundLocation}`
       }));
 
     const randomOrder = getRandomImageIndexOrder(inputs.productImages.length);
