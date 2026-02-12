@@ -109,6 +109,7 @@ const App: React.FC = () => {
   const [customBgInputs, setCustomBgInputs] = useState<{[key: number]: string}>({});
   const [isContentRegenerating, setIsContentRegenerating] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [previewImage, setPreviewImage] = useState<ImageResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectImportRef = useRef<HTMLInputElement>(null);
 
@@ -933,6 +934,9 @@ const App: React.FC = () => {
                                   </div>
                                 )}
                                 <div className="absolute top-6 right-6 flex gap-3 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                  <button onClick={() => setPreviewImage(img)} className="p-3 bg-white/90 backdrop-blur text-slate-900 rounded-2xl shadow-xl hover:bg-slate-900 hover:text-white active:scale-90" title="확대 보기">
+                                    <MagnifyingGlassIcon className="w-6 h-6" />
+                                  </button>
                                   <button onClick={() => downloadSingleImage(img.url, img.filename)} className="p-3 bg-white/90 backdrop-blur text-slate-900 rounded-2xl shadow-xl hover:bg-slate-900 hover:text-white active:scale-90">
                                     <ArrowDownTrayIcon className="w-6 h-6" />
                                   </button>
@@ -1039,6 +1043,22 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+      {previewImage && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6" onClick={() => setPreviewImage(null)}>
+          <div className="max-w-5xl w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-end mb-3">
+              <button className="p-2 rounded-xl bg-white text-slate-900" onClick={() => setPreviewImage(null)}>
+                <XMarkIcon className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="bg-white rounded-3xl p-4 shadow-2xl">
+              <img src={previewImage.url} alt={previewImage.filename} className="w-full h-auto rounded-2xl object-contain" />
+              <p className="mt-3 text-sm text-slate-600 font-bold">{previewImage.description}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

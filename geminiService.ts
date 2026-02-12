@@ -118,17 +118,7 @@ const extractModelslabImageValue = (result: any): string => {
   );
 };
 
-const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const el = new Image();
-    el.onload = () => resolve(el);
-    el.onerror = () => reject(new Error("마스크 생성을 위한 원본 이미지 로드 실패"));
-    el.src = toDataUrl(image);
-  });
-
-  const width = img.naturalWidth || 1024;
-  const height = img.naturalHeight || 1024;
-
+const createRoundedFallbackMasks = (width: number, height: number): { backgroundMaskBase64: string; invertedMaskBase64: string } => {
   const paintMask = (protectColor: "black" | "white"): string => {
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -171,6 +161,123 @@ const createEditMasks = async (image: ProductImageData): Promise<{ backgroundMas
   };
 };
 
+const getImageSize = async (image: ProductImageData): Promise<{ width: number; height: number }> => {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("원본 이미지 로드 실패"));
+    el.src = toDataUrl(image);
+  });
+
+  return {
+    width: Math.max(1, img.naturalWidth || 1000),
+    height: Math.max(1, img.naturalHeight || 1000)
+  };
+};
+
+const deriveMasksFromAlphaImage = async (maskLikeUrl: string, fallbackSize: { width: number; height: number }): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string } | null> => {
+  if (!maskLikeUrl) return null;
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.crossOrigin = "anonymous";
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("세그멘테이션 결과 로드 실패"));
+    el.src = maskLikeUrl;
+  });
+
+  const width = img.naturalWidth || fallbackSize.width;
+  const height = img.naturalHeight || fallbackSize.height;
+  const srcCanvas = document.createElement("canvas");
+  srcCanvas.width = width;
+  srcCanvas.height = height;
+  const srcCtx = srcCanvas.getContext("2d");
+  if (!srcCtx) return null;
+  srcCtx.drawImage(img, 0, 0, width, height);
+  const srcData = srcCtx.getImageData(0, 0, width, height);
+
+  const toMask = (invert = false): string => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    const out = ctx.createImageData(width, height);
+
+    for (let i = 0; i < srcData.data.length; i += 4) {
+      const alpha = srcData.data[i + 3];
+      const isObject = alpha > 16;
+      const protectObject = invert ? !isObject : isObject;
+      const color = protectObject ? 0 : 255;
+      out.data[i] = color;
+      out.data[i + 1] = color;
+      out.data[i + 2] = color;
+      out.data[i + 3] = 255;
+    }
+
+    ctx.putImageData(out, 0, 0);
+    return canvas.toDataURL("image/png").split(",")[1] || "";
+  };
+
+  const backgroundMaskBase64 = toMask(false);
+  const invertedMaskBase64 = toMask(true);
+  if (!backgroundMaskBase64 || !invertedMaskBase64) return null;
+  return { backgroundMaskBase64, invertedMaskBase64 };
+};
+
+const requestModelslabSegmentationMask = async (image: ProductImageData, apiKey: string): Promise<string> => {
+  if (!apiKey) return "";
+
+  const requestBodyCandidates = [
+    { key: apiKey, image: toDataUrl(image) },
+    { key: apiKey, image: image.data, base64: true },
+    { key: apiKey, init_image: toDataUrl(image) }
+  ];
+
+  const endpoints = [
+    "https://modelslab.com/api/v6/removebg",
+    "https://modelslab.com/api/v6/image_editing/removebg"
+  ];
+
+  for (const endpoint of endpoints) {
+    for (const body of requestBodyCandidates) {
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const json = await res.json();
+        const raw = extractModelslabImageValue(json);
+        const normalized = await ensureRenderableImageUrl(raw);
+        if (normalized) return normalized;
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  return "";
+};
+
+const createEditMasks = async (image: ProductImageData, modelslabApiKey?: string): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
+  const size = await getImageSize(image);
+  const segmentationMaskUrl = await requestModelslabSegmentationMask(image, modelslabApiKey || "");
+
+  if (segmentationMaskUrl) {
+    try {
+      const segmented = await deriveMasksFromAlphaImage(segmentationMaskUrl, size);
+      if (segmented) {
+        return segmented;
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  return createRoundedFallbackMasks(size.width, size.height);
+};
+
 const ensureRenderableImageUrl = async (rawValue: string): Promise<string> => {
   const normalized = normalizeGeneratedImageUrl(rawValue);
   if (!normalized) return "";
@@ -206,8 +313,8 @@ type ModelslabImageSource = {
   invertedMaskBase64: string;
 };
 
-const resolveModelslabImageSource = async (image: ProductImageData): Promise<ModelslabImageSource> => {
-  const { backgroundMaskBase64, invertedMaskBase64 } = await createEditMasks(image);
+const resolveModelslabImageSource = async (image: ProductImageData, modelslabApiKey?: string): Promise<ModelslabImageSource> => {
+  const { backgroundMaskBase64, invertedMaskBase64 } = await createEditMasks(image, modelslabApiKey);
   const maskBase64 = backgroundMaskBase64;
 
   if (!BLOB_TOKEN) {
@@ -269,12 +376,7 @@ const requestBlogContentFromApi = async (inputs: BlogInputs, contentOnly: boolea
       productLink: inputs.productLink,
       referenceLink: inputs.referenceLink,
       geminiApiKey: settings.geminiApiKey,
-      persona: inputs.persona,
-      backgroundLocation: inputs.backgroundLocation,
-      backgroundColor: inputs.backgroundColor,
-      backgroundMaterial: inputs.backgroundMaterial,
-      backgroundDish: inputs.backgroundDish,
-      dishImageCount: inputs.dishImageCount
+      persona: inputs.persona
     })
   });
 
@@ -477,6 +579,15 @@ const requestReplicateImageEdit = async (
 };
 
 
+
+const getOutputDimensionsFromSource = async (image: ProductImageData): Promise<{ width: number; height: number }> => {
+  const { width, height } = await getImageSize(image);
+  const targetWidth = 1000;
+  const ratio = height / Math.max(1, width);
+  const targetHeight = Math.max(1, Math.round(targetWidth * ratio));
+  return { width: targetWidth, height: targetHeight };
+};
+
 const composeBackgroundInpaintPrompt = (params: {
   objectProfile: ObjectProfile;
   imageRequest: { nanoPrompt?: string; description?: string };
@@ -548,7 +659,7 @@ export const generateInpaintedImage = async (
   }
 
   try {
-    const imageSource = await resolveModelslabImageSource(image);
+    const imageSource = await resolveModelslabImageSource(image, modelslabApiKey);
     const objectProfile = await analyzeObjectFromImage(image, geminiApiKey, mainKeyword, imageRequest.description || "");
     const composedPrompt = composeBackgroundInpaintPrompt({
       objectProfile,
@@ -561,6 +672,7 @@ export const generateInpaintedImage = async (
       personaHint
     });
 
+    const outputSize = await getOutputDimensionsFromSource(image);
     let generatedRaw = "";
 
     if (imageProvider === "REPLICATE") {
@@ -572,8 +684,8 @@ export const generateInpaintedImage = async (
         model: mapImageModelToModelslabId(imageModel),
         prompt: composedPrompt,
         negative_prompt: "deformed product, warped package, melted object, duplicated object, altered label, changed text, distorted geometry, blurry, low resolution, watermark",
-        width: 1024,
-        height: 1024,
+        width: outputSize.width,
+        height: outputSize.height,
         samples: 1,
         num_inference_steps: 40,
         guidance_scale: 4.5,

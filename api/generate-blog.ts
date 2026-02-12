@@ -296,7 +296,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { contentOnly, productName, mainKeyword, subKeywords, productLink, referenceLink, geminiApiKey, persona, backgroundLocation, backgroundColor, backgroundMaterial, backgroundDish, dishImageCount } = req.body || {};
+    const { contentOnly, productName, mainKeyword, subKeywords, productLink, referenceLink, geminiApiKey, persona } = req.body || {};
     const runtimeGeminiKey = String(geminiApiKey || DEFAULT_GEMINI_KEY || "").trim();
     const personaInfo = {
       targetAudience: String(persona?.targetAudience || "").trim(),
@@ -313,7 +313,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const prompt = contentOnly
       ? `기존 설정을 유지하고 블로그 본문만 개선해서 작성하세요. 제품명: ${productName}, 메인 키워드: ${mainKeyword}, 서브 키워드: ${subKeywords}. ${personaRule} 본문은 1,500자 이상으로 작성하고 네이버/구글 SEO+AEO를 반영하세요. 제목은 글자수 제한 없이 메인 키워드를 앞부분에 두고 서브 키워드를 자연스럽게 포함하세요. 본문 첫 문장은 제목과 완전히 동일해야 합니다. 소제목과 불릿 리스트를 포함하고 절대로 마크다운 굵게(**)를 사용하지 마세요. 마지막 문단에는 CTA 문구와 상품 URL(${productLink})를 함께 기재하세요.`
-      : `당신은 네이버/구글 SEO+AEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 참고 URL(${referenceLink})의 구조와 정보 밀도를 참고하되 복붙하지 말고 재작성하세요. ${personaRule} 제목은 글자수 제한 없이 메인 키워드(${mainKeyword})를 앞부분에 두고 서브 키워드(${subKeywords})를 자연스럽게 포함하세요. 본문 첫 문장은 제목과 완전히 동일하게 시작하세요. 검색 의도/구매 의도/Q&A 문맥, 소제목, 불릿 리스트를 반영하고 마크다운 굵게(**)는 사용하지 마세요. 이미지 맥락 조건: 배경=${backgroundLocation}, 색감=${backgroundColor}, 재질=${backgroundMaterial}, 식기=${backgroundDish}, 식기 연출 수량=${dishImageCount}. 마지막 문단은 CTA + 상품 URL(${productLink})로 끝내세요.`;
+      : `당신은 네이버/구글 SEO+AEO 최적화 전문 에디터입니다. "${productName}" 홍보글을 1,500자 이상의 장문으로 작성하세요. 참고 URL(${referenceLink})의 구조와 정보 밀도를 참고하되 복붙하지 말고 재작성하세요. ${personaRule} 제목은 글자수 제한 없이 메인 키워드(${mainKeyword})를 앞부분에 두고 서브 키워드(${subKeywords})를 자연스럽게 포함하세요. 본문 첫 문장은 제목과 완전히 동일하게 시작하세요. 검색 의도/구매 의도/Q&A 문맥, 소제목, 불릿 리스트를 반영하고 마크다운 굵게(**)는 사용하지 마세요. 마지막 문단은 CTA + 상품 URL(${productLink})로 끝내세요.`;
 
     const result = await generateWithFallback(
       `${prompt}\n반드시 순수 JSON으로만 응답하세요: {"title": "제목", "body": "본문", "imagePrompts": [{"nanoPrompt": "English keywords", "description": "image intent"}]}`
