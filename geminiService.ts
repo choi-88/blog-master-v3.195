@@ -260,22 +260,112 @@ const requestModelslabSegmentationMask = async (image: ProductImageData, apiKey:
   return "";
 };
 
+const dataUrlToProductImageData = (dataUrl: string): ProductImageData => {
+  const [meta, data = ""] = dataUrl.split(",");
+  const mimeMatch = meta.match(/^data:(.*?);base64$/i);
+  return {
+    data,
+    mimeType: mimeMatch?.[1] || "image/png"
+  };
+};
+
+const upscaleProductImage = async (image: ProductImageData, maxLongSide = 1600): Promise<ProductImageData> => {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("업스케일용 이미지 로드 실패"));
+    el.src = toDataUrl(image);
+  });
+
+  const srcW = img.naturalWidth || 1;
+  const srcH = img.naturalHeight || 1;
+  const longSide = Math.max(srcW, srcH);
+  const scale = longSide >= maxLongSide ? 1 : maxLongSide / longSide;
+
+  const targetW = Math.max(1, Math.round(srcW * scale));
+  const targetH = Math.max(1, Math.round(srcH * scale));
+
+  if (targetW === srcW && targetH === srcH) {
+    return image;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetW;
+  canvas.height = targetH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return image;
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, targetW, targetH);
+  const upscaledDataUrl = canvas.toDataURL(image.mimeType || "image/png", 0.95);
+  return dataUrlToProductImageData(upscaledDataUrl);
+};
+
+const resizeMaskBase64 = async (maskBase64: string, targetWidth: number, targetHeight: number): Promise<string> => {
+  if (!maskBase64) return "";
+
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("마스크 리사이즈 로드 실패"));
+    el.src = base64ToDataUrl(maskBase64, "image/png");
+  });
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return maskBase64;
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/png").split(",")[1] || "";
+};
+
+const normalizeMaskPairSize = async (
+  masks: { backgroundMaskBase64: string; invertedMaskBase64: string },
+  targetWidth: number,
+  targetHeight: number
+): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
+  return {
+    backgroundMaskBase64: await resizeMaskBase64(masks.backgroundMaskBase64, targetWidth, targetHeight),
+    invertedMaskBase64: await resizeMaskBase64(masks.invertedMaskBase64, targetWidth, targetHeight)
+  };
+};
+
 const createEditMasks = async (image: ProductImageData, modelslabApiKey?: string): Promise<{ backgroundMaskBase64: string; invertedMaskBase64: string }> => {
   const size = await getImageSize(image);
-  const segmentationMaskUrl = await requestModelslabSegmentationMask(image, modelslabApiKey || "");
 
+  const segmentationMaskUrl = await requestModelslabSegmentationMask(image, modelslabApiKey || "");
   if (segmentationMaskUrl) {
     try {
       const segmented = await deriveMasksFromAlphaImage(segmentationMaskUrl, size);
       if (segmented) {
-        return segmented;
+        return await normalizeMaskPairSize(segmented, size.width, size.height);
       }
     } catch {
-      // keep trying below
+      // continue
     }
   }
 
-  throw new Error("오브제 누끼 추출 실패: removebg 마스크를 얻지 못했습니다. 다른 원본 사진(대상 오브제 대비가 선명한 이미지)으로 다시 시도해주세요.");
+  try {
+    const upscaled = await upscaleProductImage(image);
+    const upscaledMaskUrl = await requestModelslabSegmentationMask(upscaled, modelslabApiKey || "");
+    if (upscaledMaskUrl) {
+      const upscaledSize = await getImageSize(upscaled);
+      const segmentedUpscaled = await deriveMasksFromAlphaImage(upscaledMaskUrl, upscaledSize);
+      if (segmentedUpscaled) {
+        return await normalizeMaskPairSize(segmentedUpscaled, size.width, size.height);
+      }
+    }
+  } catch {
+    // ignore and fallback below
+  }
+
+  return createRoundedFallbackMasks(size.width, size.height);
 };
 
 const blobToDataUrl = async (blob: Blob): Promise<string> => {
@@ -830,7 +920,7 @@ const generateImageWithFallbackSources = async (params: {
       };
     } catch (error: any) {
       lastError = String(error?.message || "unknown error");
-      const maskFailure = /누끼 추출 실패|removebg mask|removebg 마스크|object cutout failed/i.test(lastError);
+      const maskFailure = /누끼 추출 실패|removebg mask|removebg 마스크|object cutout failed|mask image/i.test(lastError);
       if (!maskFailure) {
         throw error;
       }
