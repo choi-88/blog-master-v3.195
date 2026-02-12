@@ -8,14 +8,17 @@ const TEXT_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pr
 const toDataUrl = (mimeType: string, base64Data: string) => `data:${mimeType};base64,${base64Data}`;
 const stripCodeFence = (text: string) => text.replace(/```json|```/g, "").trim();
 
-const defaultPersona = (inputs: BlogInputs): PersonaAnswers => ({
-  targetAudience: inputs.persona.targetAudience || "온라인 쇼핑 사용자",
-  painPoint: inputs.persona.painPoint || "제품 선택 시 정보 부족",
-  solutionBenefit: inputs.persona.solutionBenefit || `${inputs.productName}의 핵심 장점 전달`,
-  writingTone: inputs.persona.writingTone || "친근한 정보 전달형",
-  callToAction: inputs.persona.callToAction || "지금 제품 페이지에서 자세히 확인해보세요.",
-  contentFlow: inputs.persona.contentFlow || "문제 제기 → 해결 방법 → 제품 장점 → 구매 유도"
-});
+const defaultPersona = (inputs: BlogInputs): PersonaAnswers => {
+  const topic = inputs.mainKeyword || inputs.productName;
+  return {
+    targetAudience: inputs.persona.targetAudience || `${topic} 정보를 찾는 일반 소비자`,
+    painPoint: inputs.persona.painPoint || `${topic} 선택 시 제품 차이를 파악하기 어려움`,
+    solutionBenefit: inputs.persona.solutionBenefit || `${inputs.productName}의 핵심 장점과 구매 판단 기준 제시`,
+    writingTone: inputs.persona.writingTone || "친근한 정보 전달형",
+    callToAction: inputs.persona.callToAction || "지금 제품 페이지에서 자세히 확인해보세요.",
+    contentFlow: inputs.persona.contentFlow || "문제 제기 → 비교 기준 제시 → 제품 장점 설명 → 구매 유도"
+  };
+};
 
 const buildFallbackBlog = (inputs: BlogInputs): BlogPost => {
   const keyword = inputs.mainKeyword || inputs.productName;
@@ -269,39 +272,45 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
   const requiredImageCount = Math.max(1, inputs.targetImageCount || 1);
   const dishImageCount = Math.min(Math.max(0, inputs.dishImageCount || 0), requiredImageCount);
 
-  if (!GEMINI_KEY) {
-    return buildFallbackBlog(inputs);
-  }
-
-  const prompt = buildSeoPrompt(inputs);
-
-  let blogData: any;
-  try {
-    const textResult = await tryGenerateText(prompt);
-
-    if (textResult.status === "rate_limited" || textResult.status === "no_model") {
-      return buildFallbackBlog(inputs);
+  const fallback = buildFallbackBlog(inputs);
+  let blogData: any = {
+    title: fallback.title,
+    content: fallback.content,
+    imagePrompts: [{ nanoPrompt: `${inputs.productName}, realistic product photo` }],
+    report: {
+      analysisSummary: fallback.report.analysisSummary,
+      personaAnalysis: fallback.report.personaAnalysis,
+      avgWordCount: fallback.report.avgWordCount
     }
+  };
+
+  if (GEMINI_KEY) {
+    const prompt = buildSeoPrompt(inputs);
 
     try {
-      blogData = parseBlogJson(textResult.rawText);
-    } catch {
-      blogData = {
-        title: `${inputs.mainKeyword || inputs.productName} 구매 가이드`,
-        content: stripCodeFence(textResult.rawText),
-        imagePrompts: [{ nanoPrompt: `${inputs.productName}, realistic product photo` }],
-        report: {
-          analysisSummary: "모델 응답을 원문 기반으로 정리했습니다.",
-          personaAnalysis: "입력한 페르소나를 기준으로 문맥을 유지했습니다.",
-          avgWordCount: 1500
+      const textResult = await tryGenerateText(prompt);
+
+      if (textResult.status === "ok") {
+        try {
+          blogData = parseBlogJson(textResult.rawText);
+        } catch {
+          blogData = {
+            title: `${inputs.mainKeyword || inputs.productName} 구매 가이드`,
+            content: stripCodeFence(textResult.rawText),
+            imagePrompts: [{ nanoPrompt: `${inputs.productName}, realistic product photo` }],
+            report: {
+              analysisSummary: "모델 응답을 원문 기반으로 정리했습니다.",
+              personaAnalysis: "입력한 페르소나를 기준으로 문맥을 유지했습니다.",
+              avgWordCount: 1500
+            }
+          };
         }
-      };
+      }
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        throw new Error("API 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.");
+      }
     }
-  } catch (error: any) {
-    if (error?.name === "AbortError") {
-      throw new Error("API 응답 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.");
-    }
-    return buildFallbackBlog(inputs);
   }
 
   const sourceImages = (inputs.productImages || []).slice(0, 20);
@@ -330,7 +339,7 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
     }
   }
 
-  const normalizedContent = blogData.content || blogData.body || "";
+  const normalizedContent = blogData.content || blogData.body || fallback.content;
   const normalizedTitle = blogData.title || `${inputs.mainKeyword || inputs.productName} 활용 가이드`;
 
   return {
@@ -342,9 +351,9 @@ export const generateBlogSystem = async (inputs: BlogInputs): Promise<BlogPost> 
       rankingProbability: 98,
       safetyIndex: 96,
       suggestedCategory: "상품 리뷰",
-      analysisSummary: blogData.report?.analysisSummary || "콘텐츠 생성이 완료되었습니다.",
+      analysisSummary: blogData.report?.analysisSummary || fallback.report.analysisSummary,
       requiredImageCount,
-      personaAnalysis: blogData.report?.personaAnalysis || "입력한 페르소나 기반으로 구성",
+      personaAnalysis: blogData.report?.personaAnalysis || fallback.report.personaAnalysis,
       avgWordCount: Number(blogData.report?.avgWordCount) || 1500
     },
     images: finalImages,
