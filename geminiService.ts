@@ -582,9 +582,21 @@ const requestReplicateImageEdit = async (
 
 const getOutputDimensionsFromSource = async (image: ProductImageData): Promise<{ width: number; height: number }> => {
   const { width, height } = await getImageSize(image);
-  const targetWidth = 1000;
   const ratio = height / Math.max(1, width);
-  const targetHeight = Math.max(1, Math.round(targetWidth * ratio));
+
+  let targetWidth = 1000;
+  let targetHeight = Math.max(1, Math.round(targetWidth * ratio));
+
+  if (targetHeight > 1024) {
+    targetHeight = 1024;
+    targetWidth = Math.max(1, Math.round(targetHeight / Math.max(ratio, 0.0001)));
+  }
+
+  if (targetWidth > 1000) {
+    targetWidth = 1000;
+    targetHeight = Math.max(1, Math.round(targetWidth * ratio));
+  }
+
   return { width: targetWidth, height: targetHeight };
 };
 
@@ -731,9 +743,11 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
 
     const randomOrder = getRandomImageIndexOrder(inputs.productImages.length);
     const generatedImages = await Promise.all(
-      imageRequests.map((imageRequest, index) =>
-        generateInpaintedImage(
-          inputs.productImages[randomOrder[index % randomOrder.length]],
+      imageRequests.map(async (imageRequest, index) => {
+        const sourceIndex = randomOrder[index % randomOrder.length];
+        const selectedImage = inputs.productImages[sourceIndex];
+        const generated = await generateInpaintedImage(
+          selectedImage,
           inputs.backgroundLocation,
           inputs.backgroundColor,
           inputs.backgroundMaterial,
@@ -747,8 +761,13 @@ export const generateBlogSystem = async (inputs: BlogInputs, contentOnly = false
           settings.modelslabApiKey,
           settings.replicateApiKey,
           settings.geminiApiKey
-        )
-      )
+        );
+
+        return {
+          ...generated,
+          description: `${generated.description} [source_index=${sourceIndex}]`
+        };
+      })
     );
 
     finalImages.push(...generatedImages);

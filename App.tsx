@@ -392,10 +392,19 @@ const App: React.FC = () => {
     }
   };
 
+
+  const extractSourceIndexFromDescription = (description?: string): number | null => {
+    const match = String(description || '').match(/\[source_index=(\d+)\]/);
+    if (!match) return null;
+    const idx = Number(match[1]);
+    return Number.isInteger(idx) ? idx : null;
+  };
+
   const regenerateSingleImage = async (index: number, customBg?: string) => {
     if (!result || isRegenerating !== null) return;
     
-    const originalImage = inputs.productImages[index % inputs.productImages.length];
+    const sourceIndex = extractSourceIndexFromDescription(result.images[index]?.description) ?? (index % inputs.productImages.length);
+    const originalImage = inputs.productImages[sourceIndex];
     if (!originalImage) return;
 
     setIsRegenerating(index);
@@ -426,7 +435,7 @@ const App: React.FC = () => {
         setResult(prev => {
           if (!prev) return null;
           const updatedImages = [...prev.images];
-          updatedImages[index] = newImg;
+          updatedImages[index] = { ...newImg, description: `${newImg.description} [source_index=${sourceIndex}]` };
           return { ...prev, images: updatedImages };
         });
       } else {
