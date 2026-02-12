@@ -1,6 +1,7 @@
 
 export type AiEngine = 'GEMINI' | 'CHATGPT' | 'CLAUDE';
 export type GenerationMode = 'FULL' | 'IMAGE_ONLY'; // 추가: 전체 생성 vs 이미지 전용 생성
+export type ImageProvider = 'MODELSLAB' | 'REPLICATE';
 
 export interface PersonaAnswers {
   targetAudience: string;
@@ -33,6 +34,11 @@ export interface BlogInputs {
   selectedEngine: AiEngine;
   generationMode: GenerationMode; // 추가
   customApiKey?: string;
+  geminiApiKey?: string;
+  modelslabApiKey?: string;
+  replicateApiKey?: string;
+  imageProvider?: ImageProvider;
+  imageModel?: string;
   revisionComment?: string;
 }
 

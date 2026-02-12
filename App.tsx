@@ -48,8 +48,22 @@ import {
   CommandLineIcon,
   ListBulletIcon,
   FolderArrowDownIcon,
-  ArrowUpTrayIcon
+  ArrowUpTrayIcon,
+  Cog6ToothIcon,
+  XMarkIcon
 } from '@heroicons/react/24/outline';
+
+
+const IMAGE_PROVIDER_OPTIONS = [
+  { label: 'ModelsLab', value: 'MODELSLAB' },
+  { label: 'Replicate', value: 'REPLICATE' }
+];
+
+const IMAGE_MODEL_OPTIONS = [
+  { label: '나노바나나', value: 'nano-banana' },
+  { label: '나노바나나 프로', value: 'nano-banana-pro' },
+  { label: '구글 이마진3', value: 'google-imagen3' }
+];
 
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -81,6 +95,11 @@ const App: React.FC = () => {
     targetImageCount: 6,
     selectedEngine: 'GEMINI',
     generationMode: 'FULL',
+    geminiApiKey: '',
+    modelslabApiKey: '',
+    replicateApiKey: '',
+    imageProvider: 'MODELSLAB',
+    imageModel: 'nano-banana-pro',
     revisionComment: ''
   });
 
@@ -89,8 +108,38 @@ const App: React.FC = () => {
   const [isRegenerating, setIsRegenerating] = useState<number | null>(null);
   const [customBgInputs, setCustomBgInputs] = useState<{[key: number]: string}>({});
   const [isContentRegenerating, setIsContentRegenerating] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const projectImportRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('sc_settings_v1');
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      setInputs(prev => ({
+        ...prev,
+        geminiApiKey: parsed.geminiApiKey || '',
+        modelslabApiKey: parsed.modelslabApiKey || '',
+        replicateApiKey: parsed.replicateApiKey || '',
+        imageProvider: parsed.imageProvider || prev.imageProvider,
+        imageModel: parsed.imageModel || prev.imageModel
+      }));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('sc_settings_v1', JSON.stringify({
+      geminiApiKey: inputs.geminiApiKey || '',
+      modelslabApiKey: inputs.modelslabApiKey || '',
+      replicateApiKey: inputs.replicateApiKey || '',
+      imageProvider: inputs.imageProvider || 'MODELSLAB',
+      imageModel: inputs.imageModel || 'nano-banana-pro'
+    }));
+  }, [inputs.geminiApiKey, inputs.modelslabApiKey, inputs.replicateApiKey, inputs.imageProvider, inputs.imageModel]);
+
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -245,6 +294,7 @@ const App: React.FC = () => {
       if (!inputs.productName) return alert('제품명을 입력해주세요.');
     }
     if (inputs.productImages.length === 0) return alert('제품 사진을 최소 1장 이상 업로드해주세요.');
+    if (!inputs.geminiApiKey?.trim()) return alert('설정에서 Gemini API Key를 입력해주세요.');
 
     setAppState(AppState.ANALYZING);
     try {
@@ -283,33 +333,62 @@ const App: React.FC = () => {
     }
   };
 
-  const downloadAllAsZip = async () => {
-    if (!result) return;
-    const zip = new JSZip();
-    if (result.mode === 'FULL') {
-      zip.file("blog_content.txt", `${result.title}\n\n${result.content}`);
-    }
-    const imgFolder = zip.folder("images");
-    
-    result.images.forEach((img, idx) => {
-      if (img.url) {
-        const base64Data = img.url.split(',')[1];
-        imgFolder?.file(img.filename || `image_${idx + 1}.png`, base64Data, { base64: true });
-      }
-    });
 
-    const content = await zip.generateAsync({ type: "blob" });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(content);
-    link.download = `${(inputs.mainKeyword || inputs.productName).replace(/\s/g, '_')}_package.zip`;
-    link.click();
+  const toUint8ArrayFromImageUrl = async (url: string): Promise<Uint8Array> => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`이미지 다운로드 실패: ${response.status}`);
+    }
+
+    const buffer = await response.arrayBuffer();
+    return new Uint8Array(buffer);
   };
 
-  const downloadSingleImage = (url: string, filename: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
+  const downloadAllAsZip = async () => {
+    if (!result) return;
+
+    try {
+      const zip = new JSZip();
+      if (result.mode === 'FULL') {
+        zip.file("blog_content.txt", `${result.title}\n\n${result.content}`);
+      }
+      const imgFolder = zip.folder("images");
+
+      await Promise.all(
+        result.images.map(async (img, idx) => {
+          if (!img.url) return;
+          const imageBytes = await toUint8ArrayFromImageUrl(img.url);
+          imgFolder?.file(img.filename || `image_${idx + 1}.png`, imageBytes);
+        })
+      );
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${(inputs.mainKeyword || inputs.productName).replace(/\s/g, '_')}_package.zip`;
+      link.click();
+    } catch (error: any) {
+      alert(`이미지 ZIP 저장 중 오류 발생: ${error?.message || 'unknown error'}`);
+    }
+  };
+
+  const downloadSingleImage = async (url: string, filename: string) => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`이미지 다운로드 실패: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error: any) {
+      alert(`이미지 저장 중 오류 발생: ${error?.message || 'unknown error'}`);
+    }
   };
 
   const regenerateSingleImage = async (index: number, customBg?: string) => {
@@ -393,6 +472,47 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 pb-24 font-sans selection:bg-indigo-100 selection:text-indigo-700">
+
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-white rounded-3xl p-8 shadow-2xl border border-slate-200 space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-2xl font-black">API / 이미지 모델 설정</h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="p-2 rounded-xl hover:bg-slate-100"><XMarkIcon className="w-6 h-6" /></button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2 space-y-2">
+                <label className="text-xs font-black text-slate-500">Gemini API Key (필수)</label>
+                <input type="password" value={inputs.geminiApiKey || ''} onChange={(e)=>handleInputChange('geminiApiKey', e.target.value)} className="w-full p-4 rounded-xl border bg-slate-50" placeholder="AIza..." />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black text-slate-500">ModelsLab API Key</label>
+                <input type="password" value={inputs.modelslabApiKey || ''} onChange={(e)=>handleInputChange('modelslabApiKey', e.target.value)} className="w-full p-4 rounded-xl border bg-slate-50" placeholder="ModelsLab key" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black text-slate-500">Replicate API Key</label>
+                <input type="password" value={inputs.replicateApiKey || ''} onChange={(e)=>handleInputChange('replicateApiKey', e.target.value)} className="w-full p-4 rounded-xl border bg-slate-50" placeholder="r8_..." />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black text-slate-500">이미지 제공자</label>
+                <select value={inputs.imageProvider || 'MODELSLAB'} onChange={(e)=>handleInputChange('imageProvider', e.target.value)} className="w-full p-4 rounded-xl border bg-slate-50">
+                  {IMAGE_PROVIDER_OPTIONS.map((o)=><option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black text-slate-500">이미지 모델</label>
+                <select value={inputs.imageModel || 'nano-banana-pro'} onChange={(e)=>handleInputChange('imageModel', e.target.value)} className="w-full p-4 rounded-xl border bg-slate-50">
+                  {IMAGE_MODEL_OPTIONS.map((o)=><option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button onClick={() => { setIsSettingsOpen(false); alert('설정이 저장되었습니다.'); }} className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-black">저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCopySuccess && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] animate-in fade-in slide-in-from-top-4 duration-300">
           <div className="bg-slate-900 text-white px-8 py-4 rounded-full shadow-2xl flex items-center gap-3">
@@ -412,6 +532,9 @@ const App: React.FC = () => {
             <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest leading-none">V6.8 SEO & SEDA ENGINE</span>
           </div>
         </div>
+        <button onClick={() => setIsSettingsOpen(true)} className="px-4 py-2 rounded-xl bg-slate-900 text-white font-black text-xs flex items-center gap-2">
+          <Cog6ToothIcon className="w-4 h-4" /> 설정
+        </button>
       </header>
 
       <main className="max-w-7xl mx-auto px-8 pt-12">
